@@ -14,6 +14,72 @@ function ctrl = crea_mpc(tipo, pacco, par, p)
 % L'orizzonte di controllo vale 1: u resta costante su tutta la predizione,
 % come nel paper. Le eps (p per Jm, 2p per Jdelta) sono una per passo.
 
+% =========================================================================
+% =========================================================================
+%
+%   ATTENZIONE - PROBLEMA APERTO: L'MPC CON nlmpc E' LENTO
+%
+% -------------------------------------------------------------------------
+% IL PROBLEMA
+%
+%   Con l'oggetto nlmpc del Model Predictive Control Toolbox un passo di
+%   controllo costa tra 15 e 140 ms (misurato con N = 5 celle, p = 5).
+%   La versione precedente, con il problema linearizzato e quadprog,
+%   costava circa 1 ms a passo.
+%
+%   Una scarica dura 2500-3000 passi: ogni simulazione passa da pochi
+%   secondi a qualche minuto. Lo scenario B (9 simulazioni, orizzonti fino
+%   a p = 15) richiede decine di minuti; p = 35 in main_throughput e'
+%   ancora piu' pesante.
+%
+% PERCHE' E' LENTO
+%
+%   - nlmpc risolve a ogni passo un problema NON lineare con fmincon (SQP),
+%     non un QP.
+%   - Anche gli stati predetti sono incognite: 2*N*p variabili in piu'
+%     rispetto alle sole correnti di bilanciamento (50 con N = 5, p = 5).
+%   - nlmpcmove ha un costo fisso di validazione a ogni chiamata.
+%   Le derivate analitiche sono gia' fornite (nlobj.Jacobian): senza, il
+%   passo costava circa 300 ms.
+%
+% I RISULTATI NON SONO IN DISCUSSIONE
+%
+%   Nello scenario A nessun passo fallito, somma delle u nulla, e J_t
+%   identico alla versione con quadprog (2529 s, +6.35 %). Il problema e'
+%   solo il tempo di calcolo.
+%
+% ALTERNATIVE (nessuna ancora applicata)
+%
+%   1) SOLUTORE QP DEL TOOLBOX MPC
+%      Tornare al problema linearizzato a ogni passo (Remark 3 del paper)
+%      e risolverlo con mpcActiveSetSolver o mpcInteriorPointSolver al
+%      posto di quadprog. Atteso circa 1 ms a passo.
+%      Contro: si perde l'oggetto nlmpc; entrambi i solutori vogliono un
+%      Hessiano definito positivo, quindi per J_m e J_Delta serve una
+%      piccola regolarizzazione sulle slack eps.
+%
+%   2) TENERE nlmpc E COMPILARLO IN MEX
+%      Con MATLAB Coder (buildMEX / nlmpcmoveCodeGeneration). Sul PC ci
+%      sono sia il Coder sia il compilatore MinGW. Di solito e' alcune
+%      volte piu' veloce, ma qui non e' stato misurato.
+%      Contro: va ricompilato per ogni formulazione e ogni orizzonte
+%      (circa un minuto ciascuno) e il codice va adattato ai limiti del
+%      Coder (niente funzioni annidate, niente campi dinamici).
+%
+%   3) TORNARE A quadprog
+%      Ripristinare la versione senza toolbox MPC: circa 1 ms a passo.
+%      Attenzione: con quella versione J_m e J_Delta davano circa +6.3 %
+%      nello scenario A contro il +4.2 / +4.6 % di adesso; la differenza
+%      sta nel modo in cui si rilassa il vincolo di tensione e non e'
+%      stata chiarita.
+%
+%   4) ALLEGGERIRE LE PROVE SENZA CAMBIARE CODICE
+%      Ridurre par.scenarioB.orizzonti e par.throughput.orizzonti in
+%      init_parametri.m (per esempio solo p = 5).
+%
+% =========================================================================
+% =========================================================================
+
 N = pacco.numero_celle;
 switch tipo
     case 'Jt',     n_eps = 0;

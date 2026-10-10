@@ -73,5 +73,6 @@ par.scenarioB.orizzonti = [5 10 15];   % orizzonti p da confrontare
 %% 7) Simulazione e tempi di calcolo
 
 par.sim.t_max = 6*3600;                % [s] durata massima di una simulazione
+par.sim.Ts_integrazione = 1;           % [s] passo di integrazione del modello fisico in Simulink (sottomultiplo di par.mpc.Ts)
 par.throughput.orizzonti = [5 35];     % orizzonti p per la misura dei tempi
 par.throughput.campioni  = 40;         % stati su cui si misura il tempo
