@@ -1,0 +1,1329 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[margin=2.5cm]{geometry}
+
+% Sezioni e sottosezioni sono numerate; i titoli di livello inferiore no
+\setcounter{secnumdepth}{2}
+
+\newcommand{\file}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\rif}{[L]}                      % il documento sulla linearizzazione
+\newcommand{\Dc}{\mathcal{D}}
+\newcommand{\Pc}{\mathcal{P}}
+\newcommand{\uno}{\mathbf{1}}
+
+\title{Costruzione del problema quadratico\\nell'MPC di bilanciamento attivo}
+\author{Blocco \file{Problema_QP} del modello Simulink \file{Bilanciamento_MPC.slx}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent
+A ogni passo di controllo l'MPC di bilanciamento deve risolvere un problema di
+ottimo. Questo documento descrive come il blocco \file{Problema_QP} lo scrive
+nella forma che il solutore \texttt{quadprog} sa risolvere: un problema
+quadratico (QP). È la continuazione di \file{Linearizzazione_MPC.pdf}, citato
+nel seguito come \rif: quel documento spiega come si ottiene la predizione
+linearizzata delle celle, questo spiega che cosa se ne fa. Si può leggere da
+solo: i risultati di \rif\ che servono sono richiamati nella
+sezione~\ref{sec:incognite}, i concetti sui problemi quadratici nella
+sezione~\ref{sec:richiami}.
+
+\section{Il quadro generale}\label{sec:quadro}
+
+Il controllo predittivo (MPC, \emph{model predictive control}) lavora così. A
+ogni passo di controllo, all'istante $k$:
+\begin{enumerate}
+  \item misura lo stato delle celle;
+  \item con un modello predice come evolveranno nei prossimi $p$ passi, in
+        funzione delle correnti di bilanciamento $u^1, \dots, u^N$;
+  \item sceglie le correnti che rendono migliore la predizione, secondo un
+        costo e nel rispetto di alcuni vincoli;
+  \item le applica per un solo passo, poi ricomincia da capo con le nuove
+        misure.
+\end{enumerate}
+Il punto 3 è un problema di ottimo, risolto di nuovo a ogni passo: deve quindi
+poter essere risolto in modo rapido e sicuro. Nel sottosistema
+\file{Controllo} il lavoro è diviso tra quattro blocchi, in catena:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Blocco & Che cosa calcola & Dove è descritto \\
+\midrule
+\file{Cella_nominale} & il riferimento $r_1, \dots, r_p$ & \rif \\
+\file{Predizione_linearizzata} & $\bar Y$, $\bar S$, $D$, $E$ & \rif \\
+\file{Problema_QP} & $H$, $f$, $A$, $b$, $A_{eq}$, $b_{eq}$, $z_0$ & questo documento \\
+\file{Solutore_QP} & la soluzione $z$, che contiene le correnti & sezioni~\ref{sec:attivi} e~\ref{sec:partenza} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Il blocco \file{Problema_QP} non risolve nulla: prepara i dati. Riceve dei
+numeri (la predizione, il riferimento, la mossa precedente) e restituisce
+altri numeri, disposti in matrici: quelle che descrivono il problema da
+risolvere. Capire il blocco significa capire perché ogni numero finisce in
+quella posizione di quella matrice. Il documento procede così:
+\begin{itemize}
+  \item la sezione~\ref{sec:richiami} richiama che cos'è un problema
+        quadratico e come lo si scrive;
+  \item la sezione~\ref{sec:controllo} presenta il problema di controllo del
+        paper e i tre ostacoli che impediscono di trattarlo subito come un QP;
+  \item le sezioni dalla~\ref{sec:incognite} alla~\ref{sec:rimanenti}
+        costruiscono il QP un pezzo alla volta: incognite, vincolo di tensione,
+        costo, vincoli rimanenti;
+  \item la sezione~\ref{sec:completo} mette insieme i pezzi in una procedura
+        passo per passo, la \ref{sec:partenza} costruisce il punto di
+        partenza, la \ref{sec:proprieta} ricava le proprietà del problema;
+  \item le ultime tre sezioni trattano il caso in cui si bilancia il SOC,
+        svolgono un esempio numerico e indicano dove si trova ogni passaggio
+        nel codice.
+\end{itemize}
+
+\paragraph{Convenzioni.} In tutto il documento valgono le convenzioni
+seguenti.
+\begin{itemize}
+  \item \emph{Numeri di equazione.} ``eq.~6'' e ``Remark~3'' rimandano al
+        paper di Chen, Behal e Li (IEEE CDC 2021). I numeri tra sole
+        parentesi, come (9), sono le equazioni di questo documento. Con
+        \rif\ si rimanda a \file{Linearizzazione_MPC.pdf}: per esempio
+        [L,~(6)] è la sua equazione (6).
+  \item \emph{Indici.} $n = 1,\dots,N$ è la cella, scritta come indice in
+        alto ($u^n$); $k$ è l'istante attuale; $j = 1,\dots,p$ è il passo lungo
+        l'orizzonte. Le matrici $\bar Y$, $D$, $Y^0$ sono $p \times N$: la riga
+        $j$ corrisponde all'istante $k+j$, la colonna $n$ alla cella $n$.
+  \item \emph{Componenti.} $z_i$ è la componente $i$ del vettore $z$, $H_{il}$
+        l'elemento di riga $i$ e colonna $l$ della matrice $H$; ${}^\top$
+        indica la trasposizione.
+  \item \emph{Barra.} Una grandezza con la barra, come $\bar u$ o $\bar Y$, è
+        calcolata nel punto di linearizzazione, cioè con le correnti di
+        bilanciamento del passo precedente.
+  \item \emph{Correnti.} Sono positive in scarica. Una corrente di
+        bilanciamento $u^n > 0$ significa quindi che il bilanciatore preleva
+        carica dalla cella $n$; $u^n < 0$ che gliene cede.
+\end{itemize}
+
+\section{Richiami sui problemi quadratici}\label{sec:richiami}
+
+\subsection{Definizione}
+
+Un problema quadratico è un problema di minimo in cui il costo è un polinomio
+di secondo grado nelle incognite e i vincoli sono di primo grado. Nella forma
+usata da \texttt{quadprog}:
+\begin{equation}
+  \min_{z} \;\; \tfrac12\, z^\top H z + f^\top z
+  \qquad \text{con} \qquad A\,z \le b , \quad A_{eq}\, z = b_{eq} .
+  \label{eq:qp}
+\end{equation}
+Gli oggetti che vi compaiono sono:
+\begin{itemize}
+  \item $z \in \mathbb{R}^{n_z}$, il vettore colonna delle incognite
+        $z_1, \dots, z_{n_z}$;
+  \item $H$, matrice simmetrica $n_z \times n_z$, e $f \in \mathbb{R}^{n_z}$,
+        che insieme definiscono il costo;
+  \item $A$, matrice $m \times n_z$, e $b \in \mathbb{R}^{m}$, che definiscono
+        $m$ vincoli di disuguaglianza;
+  \item $A_{eq}$ e $b_{eq}$, che definiscono allo stesso modo i vincoli di
+        uguaglianza.
+\end{itemize}
+Le disuguaglianze si leggono riga per riga: la riga $q$ dice che
+\[
+  A_{q1}\, z_1 + A_{q2}\, z_2 + \dots + A_{q n_z}\, z_{n_z} \;\le\; b_q .
+\]
+Ogni riga di $A$ è quindi un vincolo e ogni colonna un'incognita: l'elemento
+$A_{qi}$ è il coefficiente con cui l'incognita $z_i$ compare nel vincolo $q$,
+ed è zero se non vi compare.
+
+\subsection{Come si leggono $H$ e $f$ da un costo}\label{sec:regola-costo}
+
+Svolgendo i prodotti nella \eqref{eq:qp}, e usando la simmetria di $H$, il
+costo si scrive
+\begin{equation}
+  \tfrac12\, z^\top H z + f^\top z
+  = \tfrac12 \sum_{i} H_{ii}\, z_i^2
+    + \sum_{i < l} H_{il}\, z_i z_l
+    + \sum_{i} f_i\, z_i .
+  \label{eq:scalare}
+\end{equation}
+Confrontando con un costo scritto per esteso si ottiene la regola che sarà
+usata in tutto il documento:
+\begin{itemize}
+  \item se nel costo compare $a\,z_i^2$, allora $H_{ii} = 2a$;
+  \item se compare $c\,z_i z_l$ con $i \ne l$, allora $H_{il} = H_{li} = c$;
+  \item se compare $g\,z_i$, allora $f_i = g$;
+  \item i termini che non contengono incognite si scartano: sommare una
+        costante al costo non sposta il punto in cui è minimo.
+\end{itemize}
+Per esempio, il costo $3 z_1^2 + z_1 z_2 + 5 z_2^2 - 4 z_1 + 7$ corrisponde a
+\[
+  H = \begin{bmatrix} 6 & 1 \\ 1 & 10 \end{bmatrix}, \qquad
+  f = \begin{bmatrix} -4 \\ 0 \end{bmatrix} .
+\]
+Il fattore $\tfrac12$ è una convenzione: fa sì che il gradiente del costo sia
+$Hz + f$ e che $H$ sia la matrice delle sue derivate seconde. In questo
+documento i prodotti misti $z_i z_l$ non compariranno mai: $H$ sarà sempre una
+matrice diagonale.
+
+\subsection{Come si scrive un vincolo}\label{sec:regola-vincolo}
+
+Per portare un vincolo di primo grado nella forma di una riga di $A z \le b$
+bastano tre mosse:
+\begin{enumerate}
+  \item portare a sinistra i termini con le incognite e a destra i numeri;
+  \item se il verso è $\ge$, moltiplicare i due membri per $-1$, il che lo
+        rovescia in $\le$;
+  \item spezzare un vincolo doppio in due righe: $l \le z_i \le h$ diventa
+        $z_i \le h$ e $-z_i \le -l$.
+\end{enumerate}
+Per esempio $2 z_1 \ge 3 + z_2$ diventa prima $2 z_1 - z_2 \ge 3$ e poi
+$-2 z_1 + z_2 \le -3$: la riga di $A$ è $[\,-2 \;\; 1\,]$ e l'elemento di $b$ è
+$-3$. Un vincolo di uguaglianza diventa, allo stesso modo, una riga di
+$A_{eq}\, z = b_{eq}$.
+
+\subsection{Convessità: perché un QP si risolve bene}\label{sec:convessita}
+
+Una matrice simmetrica $H$ è \emph{semidefinita positiva} se
+$z^\top H z \ge 0$ per ogni $z$, e \emph{definita positiva} se
+$z^\top H z > 0$ per ogni $z \ne 0$. Per una matrice diagonale il controllo è
+immediato, perché $z^\top H z = \sum_i H_{ii}\, z_i^2$: è semidefinita positiva
+se e solo se tutti gli elementi della diagonale sono maggiori o uguali a zero,
+definita positiva se e solo se sono tutti maggiori di zero. Valgono allora i
+fatti seguenti.
+\begin{itemize}
+  \item L'insieme dei punti che rispettano tutti i vincoli si chiama
+        \emph{insieme ammissibile}. Ogni disuguaglianza di primo grado
+        individua un semispazio e ogni uguaglianza un iperpiano: l'insieme
+        ammissibile è la loro intersezione, un poliedro. È un insieme
+        convesso: il segmento che unisce due punti ammissibili è fatto di
+        punti ammissibili.
+  \item Se $H$ è semidefinita positiva il costo è una funzione convessa, e il
+        QP si dice convesso. In un QP convesso ogni minimo locale è anche
+        globale: un solutore che si ferma in un punto da cui non riesce più a
+        migliorare ha trovato la soluzione, non un minimo ``sbagliato''.
+  \item Se $H$ è definita positiva e l'insieme ammissibile non è vuoto, la
+        soluzione esiste ed è unica.
+  \item Se $H$ è solo semidefinita positiva, la soluzione esiste purché
+        l'insieme ammissibile non sia vuoto e il costo vi sia limitato
+        inferiormente (teorema di Frank e Wolfe); in generale può non essere
+        unica.
+\end{itemize}
+Sono queste proprietà a rendere il QP adatto a un controllo in tempo reale:
+la soluzione trovata è quella giusta, e i tempi di calcolo sono contenuti e
+prevedibili.
+
+\subsection{Punti ammissibili, vincoli attivi e metodo active-set}\label{sec:attivi}
+
+Un punto $z$ è \emph{ammissibile} se rispetta tutti i vincoli. Un vincolo di
+disuguaglianza è \emph{attivo} in $z$ se vi vale con il segno di uguaglianza:
+il punto sta sul bordo del semispazio corrispondente. Nella soluzione di un QP
+alcuni vincoli sono attivi e gli altri no; se si sapesse in anticipo quali,
+basterebbe risolvere un sistema di equazioni di primo grado.
+
+Il metodo \emph{active-set}, che \texttt{quadprog} usa nel modello, lo scopre
+per tentativi ordinati. Parte da un punto, tiene un elenco dei vincoli che
+considera attivi, risolve il problema come se quelli fossero uguaglianze e a
+ogni iterazione aggiunge o toglie un vincolo dall'elenco, finché non può più
+migliorare. Ha bisogno di un punto da cui partire: per questo il blocco gliene
+prepara uno, $z_0$, già ammissibile (sezione~\ref{sec:partenza}).
+
+\section{Il problema di controllo}\label{sec:controllo}
+
+\subsection{Incognite e vincoli}
+
+All'istante $k$ le incognite sono le correnti di bilanciamento, una per cella:
+$u = (u^1, \dots, u^N)$. Ciascuna è tenuta costante su tutto l'orizzonte di
+predizione, quindi le incognite sono $N$ e non $pN$. Devono rispettare tre
+vincoli (eq.~6d--6f):
+\begin{align}
+  & u_{\min} \le u^n \le u_{\max} ,
+     && n = 1,\dots,N , \label{eq:limiti}\\
+  & y^n_{k+j} \ge y_{\min} ,
+     && j = 1,\dots,p , \quad n = 1,\dots,N , \label{eq:tensione}\\
+  & \sum_{n=1}^{N} u^n = 0 . \label{eq:somma}
+\end{align}
+\begin{itemize}
+  \item La \eqref{eq:limiti} esprime i limiti del convertitore di
+        bilanciamento (nel progetto $\pm 2$~A).
+  \item Nella \eqref{eq:tensione} $y^n_{k+j}$ è la tensione predetta della
+        cella $n$ all'istante $k+j$. Sotto $y_{\min}$ (nel progetto 3,2~V) la
+        cella cede, e con lei l'intero pacco, perché le celle sono in serie. È
+        il vincolo che dà senso a tutto il resto: lo scopo del bilanciamento è
+        tenere tutte le celle lontane da $y_{\min}$ il più a lungo possibile.
+  \item La \eqref{eq:somma} dice che il bilanciatore sposta carica da una
+        cella all'altra, senza crearne né consumarne: ciò che toglie a una
+        cella lo cede a un'altra.
+\end{itemize}
+Le tensioni predette dipendono da $u$ attraverso il modello della cella
+[L,~sezione~2]: per questo la \eqref{eq:tensione} è un vincolo sulle correnti.
+
+\subsection{I tre costi}
+
+Il paper propone tre modi di misurare quanto è buona una scelta di $u$. In
+tutti compare una \emph{grandezza bilanciata} $\sigma$, che può essere la
+tensione ($\sigma = y$) o lo stato di carica ($\sigma = s$);
+$\sigma^n_{k+j}$ è il suo valore predetto per la cella $n$ all'istante $k+j$.
+\begin{align}
+  J_t(u) &= \sum_{j=1}^{p} \sum_{n=1}^{N} \bigl(\sigma^n_{k+j} - r_j\bigr)^2
+            + \rho \sum_{n=1}^{N} (u^n)^2
+     && \text{(eq.~7)} \label{eq:jt}\\
+  J_m(u) &= -\sum_{j=1}^{p} \min_{n}\, \sigma^n_{k+j}
+            + \rho \sum_{n=1}^{N} (u^n)^2
+     && \text{(eq.~8)} \label{eq:jm}\\
+  J_\Delta(u) &= \sum_{j=1}^{p} \Bigl(\max_{n}\, \sigma^n_{k+j}
+                 - \min_{n}\, \sigma^n_{k+j}\Bigr)
+            + \rho \sum_{n=1}^{N} (u^n)^2
+     && \text{(eq.~11)} \label{eq:jd}
+\end{align}
+\begin{itemize}
+  \item Con $J_t$ ogni cella insegue un riferimento comune $r_j$: la
+        traiettoria di una \emph{cella nominale}, cioè di una cella ideale con
+        i parametri senza deviazioni, che parte dalla media degli stati
+        misurati e subisce la sola corrente di pacco (blocco
+        \file{Cella_nominale}). Se tutte le celle seguono la stessa
+        traiettoria, restano allineate. Nel paper il riferimento è indicato
+        con $\sigma^0$; nell'eq.~7 è scritto $\sigma^0_{k+1}$, qui inteso
+        $\sigma^0_{k+j}$.
+  \item Con $J_m$ si alza il più possibile, a ogni passo, la cella più bassa:
+        è quella che arriverà per prima a $y_{\min}$. Il segno meno trasforma
+        ``rendere massimo'' in ``rendere minimo''.
+  \item Con $J_\Delta$ si riduce il divario tra la cella più alta e la più
+        bassa.
+\end{itemize}
+Il secondo addendo è lo stesso nelle tre formulazioni: penalizza le correnti
+di bilanciamento grandi, che sprecano energia per effetto Joule. Nel paper è
+$u^\top R\, u$ con $R$ una matrice di peso; nel progetto $R = \rho\, I$, con
+$\rho > 0$ scelto per ciascuna formulazione e proporzionale a $p$, perché il
+primo addendo è una somma di $p$ termini e cresce con l'orizzonte.
+
+\subsection{Tre ostacoli, tre rimedi}\label{sec:ostacoli}
+
+Scritto così, il problema non è un QP, per tre ragioni. Ognuna ha un rimedio,
+e i tre rimedi insieme portano alla forma \eqref{eq:qp}.
+\begin{center}
+\begin{tabular}{p{6.6cm}p{5.2cm}l}
+\toprule
+Ostacolo & Rimedio & Sezione \\
+\midrule
+Le tensioni predette non sono funzioni di primo grado di $u$: il modello della
+cella non è lineare &
+si sostituisce la predizione con la sua retta tangente &
+\ref{sec:incognite} \\[4pt]
+Il vincolo \eqref{eq:tensione} può essere impossibile da rispettare, e allora
+il problema non ha soluzione &
+si aggiunge un'incognita $e$ che lo allenta, a caro prezzo &
+\ref{sec:vincolo-tensione} \\[4pt]
+Il minimo e il massimo tra le celle, in $J_m$ e $J_\Delta$, non sono
+polinomi &
+si aggiungono le incognite $\varepsilon$, che ne prendono il posto &
+\ref{sec:jm} e \ref{sec:jd} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Incognite e predizione linearizzata}\label{sec:incognite}
+
+\subsection{La predizione linearizzata}
+
+A ogni passo di controllo il blocco \file{Predizione_linearizzata} fornisce,
+per ogni cella $n$ e per ogni passo $j$, due numeri [L,~(6)]:
+\begin{itemize}
+  \item $\bar Y_{j,n}$, la tensione che la cella avrebbe all'istante $k+j$ se
+        la sua corrente di bilanciamento restasse quella del passo precedente,
+        $\bar u^n = u^n_{k-1}$;
+  \item $D_{j,n}$, il \emph{coefficiente di sensibilità}: di quanti volt cambia
+        quella tensione per ogni ampere in più di corrente di bilanciamento.
+\end{itemize}
+Con essi la tensione predetta è approssimata dalla retta
+$y^n_{k+j}(u^n) \simeq \bar Y_{j,n} + D_{j,n}\,(u^n - \bar u^n)$. Raccogliendo
+i termini che non contengono l'incognita:
+\begin{equation}
+  y^n_{k+j}(u^n) = Y^0_{j,n} + D_{j,n}\,u^n ,
+  \qquad
+  Y^0_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n .
+  \label{eq:pred}
+\end{equation}
+$Y^0_{j,n}$ è la \emph{risposta libera}: la tensione che la retta predice
+quando la cella non viene bilanciata ($u^n = 0$). Il prodotto $D_{j,n}\,u^n$ è
+la \emph{risposta forzata}: l'effetto della corrente di bilanciamento. Nella
+\eqref{eq:pred}, e da qui in avanti, si scrive $=$ al posto di $\simeq$: il QP
+è costruito sul modello linearizzato come se fosse esatto. Quanto
+l'approssimazione sia buona è discusso in [L,~sezione~8]. Tre proprietà della
+\eqref{eq:pred} reggono tutta la costruzione.
+\begin{itemize}
+  \item \emph{È di primo grado in $u^n$.} Elevata al quadrato dà un polinomio
+        di secondo grado; inserita in una disuguaglianza la lascia di primo
+        grado. È proprio ciò che la forma \eqref{eq:qp} richiede.
+  \item \emph{La tensione della cella $n$ dipende solo dalla sua corrente
+        $u^n$}, non da quelle delle altre celle. Nel costo non nasceranno
+        quindi prodotti misti $u^n u^m$.
+  \item \emph{$D_{j,n}$ è negativo}: una corrente di bilanciamento positiva
+        scarica di più la cella e ne abbassa la tensione. Nell'esempio di
+        [L,~sezione~5.3] vale circa $-9$~mV/A dopo un passo e $-15$~mV/A dopo
+        30.
+\end{itemize}
+Lo stesso vale per il SOC, con $\bar S$ ed $E$ al posto di $\bar Y$ e $D$. Nel
+progetto, come nelle simulazioni del paper, la grandezza bilanciata è la
+tensione: il documento è scritto per questo caso, e la
+sezione~\ref{sec:soc} indica che cosa cambia se si bilancia il SOC.
+
+\subsection{Le incognite del QP}
+
+Oltre alle correnti, il QP ha alcune incognite in più, che servono a superare
+il secondo e il terzo ostacolo della sezione~\ref{sec:ostacoli}. Sono raccolte
+tutte in un solo vettore:
+\begin{equation}
+  z = \begin{bmatrix} u \\ \varepsilon \\ e \end{bmatrix} ,
+  \label{eq:z}
+\end{equation}
+dove $u \in \mathbb{R}^N$ sono le correnti di bilanciamento, $\varepsilon$ le
+variabili ausiliarie del costo (sezioni~\ref{sec:jm} e~\ref{sec:jd}) ed $e$ è
+una sola variabile, che allenta il vincolo di tensione
+(sezione~\ref{sec:vincolo-tensione}). Il numero delle $\varepsilon$ dipende
+dalla formulazione:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Formulazione & Variabili $\varepsilon$ & Numero di $\varepsilon$ & Numero di incognite $n_z$ \\
+\midrule
+$J_t$ & nessuna & 0 & $N + 1$ \\
+$J_m$ & $\varepsilon_1, \dots, \varepsilon_p$ & $p$ & $N + p + 1$ \\
+$J_\Delta$ & $\varepsilon_1, \dots, \varepsilon_p$ e $\varepsilon_{p+1}, \dots, \varepsilon_{2p}$ & $2p$ & $N + 2p + 1$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+La posizione di ogni incognita dentro $z$ segue l'ordine della
+\eqref{eq:z}:
+\[
+  u^n \to z_n , \qquad
+  \varepsilon_j \to z_{N+j} , \qquad
+  \varepsilon_{p+j} \to z_{N+p+j} , \qquad
+  e \to z_{n_z} .
+\]
+In tutti i casi le correnti occupano le prime $N$ posizioni ed $e$ l'ultima.
+Le variabili $\varepsilon$ ed $e$ non sono grandezze da applicare al pacco:
+sono incognite di servizio, introdotte per poter scrivere il problema nella
+forma \eqref{eq:qp}. Dalla soluzione $z$ si applicano solo le prime $N$
+componenti.
+
+\subsection{Come si costruiscono le matrici}\label{sec:metodo}
+
+Il metodo è lo stesso per tutte le matrici. Si parte da $H$, $f$, $A$ e $b$
+pieni di zeri, e si esamina un pezzo del problema alla volta: un termine del
+costo oppure un gruppo di vincoli. Ogni pezzo viene scritto per esteso nelle
+incognite, e le due regole della sezione~\ref{sec:richiami} dicono quali
+elementi riempie e con quale valore:
+\begin{itemize}
+  \item un termine del costo riempie elementi di $H$ e di $f$
+        (sezione~\ref{sec:regola-costo}), nelle posizioni delle incognite che
+        contiene;
+  \item un vincolo riempie una riga nuova di $A$ e un elemento di $b$
+        (sezione~\ref{sec:regola-vincolo}): i coefficienti vanno nelle colonne
+        delle incognite che contiene.
+\end{itemize}
+In entrambi i casi serve solo sapere la posizione di ogni incognita in $z$,
+data qui sopra. Le sezioni dalla~\ref{sec:vincolo-tensione}
+alla~\ref{sec:rimanenti} fanno questo lavoro un pezzo alla volta, spiegando
+da dove viene ciascuno; la sezione~\ref{sec:completo} raccoglie poi tutti gli
+elementi in una procedura unica, passo per passo.
+
+\section{Il vincolo di tensione minima}\label{sec:vincolo-tensione}
+
+\subsection{Dal vincolo rigido al vincolo allentato}
+
+Con la \eqref{eq:pred} il vincolo \eqref{eq:tensione} diventa
+$Y^0_{j,n} + D_{j,n}\,u^n \ge y_{\min}$ per ogni $j$ e $n$: sono $pN$
+disuguaglianze di primo grado. Può però accadere che nessuna $u$ ammissibile le
+soddisfi tutte. Per esempio, con $y_{\min} = 3{,}2$~V, $D_{j,n} = -15$~mV/A e
+correnti limitate a $\pm 2$~A, la tensione predetta di una cella si può alzare
+al più di 30~mV rispetto alla risposta libera, e solo dando alla cella $-2$~A:
+se la risposta libera vale 3,15~V, il vincolo è violato qualunque sia $u$. Un
+QP con insieme ammissibile vuoto non ha soluzione: il controllore resterebbe
+senza risposta proprio quando una cella sta per cedere.
+
+Il rimedio (eq.~17) è aggiungere un'incognita $e \ge 0$ che allenta il vincolo,
+e farla pagare nel costo:
+\begin{equation}
+  Y^0_{j,n} + D_{j,n}\,u^n + e \;\ge\; y_{\min} , \qquad e \ge 0 ,
+  \qquad \text{con il termine } W e^2 \text{ aggiunto al costo.}
+  \label{eq:morbido}
+\end{equation}
+Un vincolo di questo tipo si dice \emph{morbido}, in contrapposizione a quello
+\emph{rigido} \eqref{eq:tensione}. Conviene fissare alcuni fatti.
+\begin{itemize}
+  \item \emph{Il problema ha sempre punti ammissibili.} Presa una $u$
+        qualunque che rispetti \eqref{eq:limiti} e \eqref{eq:somma}, basta
+        scegliere $e$ abbastanza grande perché la \eqref{eq:morbido} valga per
+        tutte le coppie $(j,n)$.
+  \item \emph{$e$ ha un significato preciso.} Per $e \ge 0$ il costo cresce
+        con $e$, quindi nella soluzione $e$ ha il più piccolo valore
+        compatibile con i vincoli:
+        \[
+          e = \max\Bigl(0,\; \max_{j,n}\,\bigl(y_{\min} - y^n_{k+j}\bigr)\Bigr) .
+        \]
+        È di quanti volt, nel caso peggiore, la predizione scende sotto
+        $y_{\min}$; vale zero se non ci scende mai. Per questo basta una sola
+        $e$ per tutte le celle e tutti i passi.
+  \item \emph{$W$ è molto più grande di $\rho$.} Violare il vincolo deve
+        costare molto più che usare corrente: l'MPC lo fa solo se non può
+        evitarlo. Nel progetto $W = 10^3$, mentre $\rho$ va da $10^{-3}$ a
+        $10^{-1}$.
+  \item \emph{Il vincolo morbido non equivale del tutto a quello rigido.}
+        Finché nella soluzione tutte le tensioni predette stanno sopra
+        $y_{\min}$, $e = 0$ e la variabile non ha alcun effetto. Quando invece
+        una tensione predetta si fermerebbe esattamente a $y_{\min}$, all'MPC
+        conviene una violazione piccolissima: vicino a $e = 0$ la penalità
+        $W e^2$ ha derivata nulla, mentre il resto del costo diminuisce in
+        proporzione alla violazione. La violazione che ne risulta è, con buona
+        approssimazione, inversamente proporzionale a $W$: è un altro motivo
+        per sceglierlo grande.
+  \item Il paper introduce $e$ solo quando il problema rigido risulta senza
+        soluzione; nel modello, per semplicità, $e$ è sempre presente.
+\end{itemize}
+
+\subsection{Le righe di $A$ e di $b$}
+
+Applicando alla \eqref{eq:morbido} le mosse della
+sezione~\ref{sec:regola-vincolo}, cioè incognite a sinistra, numeri a destra e
+cambio di segno per avere il verso $\le$:
+\begin{equation}
+  -D_{j,n}\,u^n - e \;\le\; Y^0_{j,n} - y_{\min} ,
+  \qquad j = 1,\dots,p , \quad n = 1,\dots,N .
+  \label{eq:riga-tensione}
+\end{equation}
+C'è un vincolo per ogni coppia $(j, n)$, quindi $pN$ righe. In ciascuna i
+coefficienti non nulli sono due: $-D_{j,n}$ nella colonna di $u^n$ e $-1$ nella
+colonna di $e$. Il termine noto è il margine con cui la risposta libera sta
+sopra $y_{\min}$. Il vincolo $e \ge 0$ è scritto più avanti, con gli altri
+vincoli semplici (sezione~\ref{sec:rimanenti}).
+
+\subsection{Il contributo al costo}
+
+Il termine $W e^2$ contiene il quadrato di un'incognita, con coefficiente $W$.
+Per la regola della sezione~\ref{sec:regola-costo}, indicando con $H_{ee}$
+l'elemento della diagonale di $H$ nella posizione di $e$, cioè l'ultimo,
+$H_{n_z n_z}$,
+\begin{equation}
+  H_{ee} = 2W .
+  \label{eq:peso-e}
+\end{equation}
+
+\section{Il costo}\label{sec:costo}
+
+Restano da scrivere gli altri elementi di $H$ e il vettore $f$. Il costo è la
+somma di tre parti: il termine sulle correnti, comune alle tre formulazioni;
+il termine $W e^2$, appena visto; la parte propria di ciascuna formulazione.
+Le formulazioni $J_m$ e $J_\Delta$ portano con sé anche dei vincoli, che sono
+descritti insieme al costo da cui nascono.
+
+\subsection{Il termine sulle correnti}
+
+Il termine $\rho \sum_n (u^n)^2$ contiene il quadrato di ogni corrente, con
+coefficiente $\rho$. Poiché $u^n$ occupa la posizione $n$ di $z$,
+\begin{equation}
+  H_{nn} = 2\rho , \qquad n = 1,\dots,N .
+  \label{eq:peso-u}
+\end{equation}
+Oltre al significato fisico, questo termine ha un ruolo matematico: rende il
+costo strettamente convesso nelle correnti, e quindi unica la soluzione
+(sezione~\ref{sec:proprieta}).
+
+\subsection{$J_t$: inseguimento della cella nominale}\label{sec:jt}
+
+Sostituendo la \eqref{eq:pred} nella \eqref{eq:jt}, il termine di inseguimento
+è
+\[
+  \sum_{j=1}^{p}\sum_{n=1}^{N} \bigl(Y^0_{j,n} + D_{j,n}\,u^n - r_j\bigr)^2 .
+\]
+Ogni addendo è il quadrato di un binomio. Chiamando
+$c_{j,n} = Y^0_{j,n} - r_j$ lo \emph{scarto} tra la risposta libera e il
+riferimento, cioè quanto la cella starebbe lontana dal riferimento senza
+bilanciamento,
+\[
+  \bigl(D_{j,n}\,u^n + c_{j,n}\bigr)^2
+  = D_{j,n}^2\,(u^n)^2 + 2\,D_{j,n}\,c_{j,n}\,u^n + c_{j,n}^2 .
+\]
+
+\paragraph{Un esempio: due celle, primo passo.} Con $N = 2$ il primo passo
+dell'orizzonte, $j = 1$, porta nel costo due addendi, uno per cella:
+\begin{align*}
+  & \bigl(D_{1,1}\,u^1 + c_{1,1}\bigr)^2 + \bigl(D_{1,2}\,u^2 + c_{1,2}\bigr)^2 \\[2pt]
+  & \qquad = D_{1,1}^2\,(u^1)^2 + D_{1,2}^2\,(u^2)^2
+      + 2\,D_{1,1}\,c_{1,1}\,u^1 + 2\,D_{1,2}\,c_{1,2}\,u^2
+      + \bigl(c_{1,1}^2 + c_{1,2}^2\bigr) .
+\end{align*}
+Nel risultato ci sono i quadrati delle due correnti, le due correnti al primo
+grado e una costante. Manca il prodotto $u^1 u^2$, perché ciascun binomio
+contiene una sola corrente. Le correnti $u^1$ e $u^2$ occupano le posizioni 1 e
+2 di $z$, quindi per la regola della sezione~\ref{sec:regola-costo} questo
+passo contribuisce a $H$ e a $f$ con
+\[
+  \begin{bmatrix} H_{11} & H_{12} \\ H_{21} & H_{22} \end{bmatrix}
+  \;\leftarrow\;
+  \begin{bmatrix} 2\,D_{1,1}^2 & 0 \\ 0 & 2\,D_{1,2}^2 \end{bmatrix} ,
+  \qquad
+  \begin{bmatrix} f_1 \\ f_2 \end{bmatrix}
+  \;\leftarrow\;
+  \begin{bmatrix} 2\,D_{1,1}\,c_{1,1} \\ 2\,D_{1,2}\,c_{1,2} \end{bmatrix} ,
+\]
+mentre la costante $c_{1,1}^2 + c_{1,2}^2$ si scarta. Con i numeri
+dell'esempio della sezione~\ref{sec:esempio}, cioè $D_{1,1} = -0{,}010$,
+$c_{1,1} = 0{,}0250$ per la cella 1 e $D_{1,2} = -0{,}011$,
+$c_{1,2} = -0{,}0255$ per la cella 2, i quattro contributi valgono
+\begin{align*}
+  2\,D_{1,1}^2 &= 2 \cdot 0{,}010^2 = 2{,}00 \cdot 10^{-4} ,
+  & 2\,D_{1,1}\,c_{1,1} &= 2 \cdot (-0{,}010) \cdot 0{,}0250 = -5{,}00 \cdot 10^{-4} , \\
+  2\,D_{1,2}^2 &= 2 \cdot 0{,}011^2 = 2{,}42 \cdot 10^{-4} ,
+  & 2\,D_{1,2}\,c_{1,2} &= 2 \cdot (-0{,}011) \cdot (-0{,}0255) = 5{,}61 \cdot 10^{-4} .
+\end{align*}
+Il secondo passo, $j = 2$, porta altri due addendi dello stesso tipo, con
+$D_{2,n}$ e $c_{2,n}$ al posto di $D_{1,n}$ e $c_{1,n}$: i loro contributi si
+\emph{sommano} a questi, nelle stesse posizioni. Lo stesso accade per ogni
+passo fino a $p$. È da qui che nascono le somme su $j$ della formula generale.
+
+\paragraph{In generale.} Sommando su $j$ gli addendi che riguardano la stessa
+cella $n$, il quadrato
+$(u^n)^2$ ha coefficiente $\sum_j D_{j,n}^2$ e $u^n$ ha coefficiente
+$2\sum_j D_{j,n}\,c_{j,n}$; l'ultimo termine non contiene incognite e si
+scarta. Aggiungendo il termine sulle correnti \eqref{eq:peso-u}, la regola
+della sezione~\ref{sec:regola-costo} dà
+\begin{equation}
+  H_{nn} = 2\sum_{j=1}^{p} D_{j,n}^2 + 2\rho , \qquad
+  f_n = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^0_{j,n} - r_j\bigr) ,
+  \qquad n = 1,\dots,N .
+  \label{eq:jt-hf}
+\end{equation}
+Non ci sono prodotti misti, perché ogni binomio contiene una sola incognita:
+il blocco di $H$ relativo alle correnti è diagonale. $J_t$ non richiede
+variabili $\varepsilon$.
+
+\paragraph{Lettura della formula.} Dimenticando per un momento i vincoli, il
+costo è la somma di $N$ parabole, una per cella, e ciascuna ha il minimo in
+\[
+  u^n = -\frac{f_n}{H_{nn}}
+      = \frac{\sum_j D_{j,n}\,\bigl(r_j - Y^0_{j,n}\bigr)}
+             {\sum_j D_{j,n}^2 + \rho} .
+\]
+È la soluzione di un problema ai \emph{minimi quadrati}: si hanno $p$ scarti
+da colmare, $r_j - Y^0_{j,n}$, e una sola incognita, $u^n$, che al passo $j$
+sposta la tensione di $D_{j,n}\,u^n$. Non potendo annullare tutti gli scarti
+con un solo numero, si sceglie quello che rende minima la somma dei quadrati
+di ciò che ne resta. Il peso $\rho$ al denominatore frena la corrente: più è
+grande, più
+$u^n$ si avvicina a zero. Anche il segno torna: se la risposta libera di una
+cella sta sopra il riferimento ($Y^0_{j,n} > r_j$), essendo $D_{j,n} < 0$
+risulta $u^n > 0$, cioè la cella viene scaricata di più e la sua tensione
+scende verso il riferimento.
+
+I vincoli modificano poi questo valore ideale: la \eqref{eq:somma} lega tra
+loro le correnti delle celle, che altrimenti sarebbero indipendenti, e la
+\eqref{eq:limiti} le limita.
+
+\subsection{$J_m$: massimizzazione della cella più bassa}\label{sec:jm}
+
+Con la \eqref{eq:pred} il costo \eqref{eq:jm} contiene, per ogni passo $j$, il
+termine $-\min_n \bigl(Y^0_{j,n} + D_{j,n}\,u^n\bigr)$. Il minimo tra $N$
+funzioni di primo grado non è un polinomio: è una funzione lineare a tratti,
+con uno spigolo ogni volta che cambia la cella più bassa. Non rientra quindi
+nella forma \eqref{eq:qp}.
+
+Il rimedio è introdurre per ogni passo $j$ una nuova incognita
+$\varepsilon_j$, e chiedere che stia sotto le tensioni di tutte le celle:
+\begin{equation}
+  \min_{u,\,\varepsilon,\,e} \;\;
+     -\sum_{j=1}^{p} \varepsilon_j + \rho \sum_{n=1}^{N} (u^n)^2 + W e^2
+  \qquad \text{con} \qquad
+  \varepsilon_j \le y^n_{k+j}
+  \quad \text{per ogni } j \text{ e } n ,
+  \label{eq:jm-eps}
+\end{equation}
+oltre ai vincoli già visti. $\varepsilon_j$ è un \emph{minorante} delle
+tensioni al passo $j$: un livello sotto il quale non scende nessuna cella.
+
+\paragraph{Perché le due scritture sono equivalenti.} Si fissi una $u$
+qualunque. I vincoli della \eqref{eq:jm-eps} dicono che $\varepsilon_j$ non
+può superare nessuna delle $N$ tensioni
+$y^1_{k+j}, \dots, y^N_{k+j}$, cioè che
+$\varepsilon_j \le \min_n y^n_{k+j}$. D'altra parte il costo diminuisce
+quando $\varepsilon_j$ aumenta. Il valore migliore è quindi il più grande
+consentito:
+\[
+  \varepsilon_j = \min_{n}\, y^n_{k+j} .
+\]
+Con questa scelta il costo della \eqref{eq:jm-eps} coincide con $J_m(u)$, a
+parte il termine $W e^2$. Rendere minimo il costo rispetto a tutte le
+incognite equivale quindi a rendere minimo $J_m$ rispetto a $u$: le due
+scritture hanno la stessa soluzione. In breve, il costo spinge
+$\varepsilon_j$ verso l'alto e i vincoli lo fermano all'altezza della cella
+più bassa. Basta il vincolo da un solo lato (Remark~2 del paper): non serve
+imporre che $\varepsilon_j$ sia \emph{uguale} al minimo, perché ci pensa il
+costo.
+
+\paragraph{Righe di $A$ e di $b$.} Sostituendo la \eqref{eq:pred} nel vincolo
+$\varepsilon_j \le y^n_{k+j}$ e portando le incognite a sinistra:
+\begin{equation}
+  \varepsilon_j - D_{j,n}\,u^n \;\le\; Y^0_{j,n} ,
+  \qquad j = 1,\dots,p , \quad n = 1,\dots,N .
+  \label{eq:riga-minorante}
+\end{equation}
+Sono altre $pN$ righe, ciascuna con due coefficienti non nulli: $+1$ nella
+colonna di $\varepsilon_j$ e $-D_{j,n}$ nella colonna di $u^n$.
+
+\paragraph{Elementi di $H$ e di $f$.} Nel costo ogni $\varepsilon_j$ compare
+al primo grado con coefficiente $-1$, e non compare al quadrato:
+\begin{equation}
+  f_{N+j} = -1 , \qquad H_{N+j,\,N+j} = 0 , \qquad j = 1,\dots,p .
+  \label{eq:jm-hf}
+\end{equation}
+Per le correnti resta solo la \eqref{eq:peso-u}, e $f_n = 0$. Nelle
+$\varepsilon$ il costo è di primo grado: $H$ ha degli zeri sulla diagonale, ed
+è semidefinita positiva ma non definita positiva.
+
+\subsection{$J_\Delta$: minima differenza tra le celle}\label{sec:jd}
+
+Il costo \eqref{eq:jd} contiene, per ogni passo, sia il minimo sia il massimo
+tra le celle. Si procede allo stesso modo, con due famiglie di incognite: le
+$\varepsilon_j$ già viste, minoranti, e altre $p$ incognite
+$\varepsilon_{p+j}$, che devono stare \emph{sopra} tutte le tensioni e ne sono
+quindi dei \emph{maggioranti}:
+\begin{equation}
+\begin{aligned}
+  & \min_{u,\,\varepsilon,\,e} \;\;
+     \sum_{j=1}^{p} \varepsilon_{p+j} - \sum_{j=1}^{p} \varepsilon_j
+     + \rho \sum_{n=1}^{N} (u^n)^2 + W e^2 \\[4pt]
+  & \text{con} \qquad
+  \varepsilon_j \;\le\; y^n_{k+j} \;\le\; \varepsilon_{p+j}
+  \quad \text{per ogni } j \text{ e } n .
+\end{aligned}
+\label{eq:jd-eps}
+\end{equation}
+L'equivalenza si dimostra come prima. Fissata $u$, il costo spinge
+$\varepsilon_j$ verso l'alto e $\varepsilon_{p+j}$ verso il basso; i vincoli li
+fermano rispettivamente sulla cella più bassa e sulla più alta. Nella soluzione
+\[
+  \varepsilon_j = \min_{n}\, y^n_{k+j} , \qquad
+  \varepsilon_{p+j} = \max_{n}\, y^n_{k+j} ,
+\]
+e la differenza $\varepsilon_{p+j} - \varepsilon_j$ è il divario tra le celle
+al passo $j$.
+
+I vincoli sui minoranti sono le righe \eqref{eq:riga-minorante}. Quelli sui
+maggioranti, $y^n_{k+j} \le \varepsilon_{p+j}$, con la \eqref{eq:pred}
+diventano
+\begin{equation}
+  D_{j,n}\,u^n - \varepsilon_{p+j} \;\le\; -Y^0_{j,n} ,
+  \qquad j = 1,\dots,p , \quad n = 1,\dots,N ,
+  \label{eq:riga-maggiorante}
+\end{equation}
+altre $pN$ righe con due coefficienti non nulli: $D_{j,n}$ nella colonna di
+$u^n$ e $-1$ nella colonna di $\varepsilon_{p+j}$. Nel costo i minoranti hanno
+coefficiente $-1$ e i maggioranti $+1$:
+\begin{equation}
+  f_{N+j} = -1 , \qquad f_{N+p+j} = +1 , \qquad j = 1,\dots,p ,
+  \label{eq:jd-hf}
+\end{equation}
+con gli elementi corrispondenti della diagonale di $H$ uguali a zero.
+
+\section{I vincoli rimanenti}\label{sec:rimanenti}
+
+Restano i vincoli che non dipendono dalla predizione. I limiti di corrente
+\eqref{eq:limiti} sono vincoli doppi, e ognuno si spezza in due righe:
+\begin{equation}
+  u^n \le u_{\max} , \qquad -u^n \le -u_{\min} ,
+  \qquad n = 1,\dots,N .
+  \label{eq:riga-limiti}
+\end{equation}
+Sono $2N$ righe con un solo coefficiente non nullo, $+1$ oppure $-1$ nella
+colonna di $u^n$. Il segno della variabile $e$ si scrive
+\begin{equation}
+  -e \le 0 ,
+  \label{eq:riga-e}
+\end{equation}
+una riga con $-1$ nella colonna di $e$. Infine la \eqref{eq:somma} è l'unico
+vincolo di uguaglianza:
+\begin{equation}
+  A_{eq} = \bigl[\; \underbrace{1 \;\; \cdots \;\; 1}_{N}
+              \;\; \underbrace{0 \;\; \cdots \;\; 0}_{n_z - N} \;\bigr] ,
+  \qquad b_{eq} = 0 .
+  \label{eq:uguaglianza}
+\end{equation}
+\texttt{quadprog} accetterebbe i limiti delle incognite anche come dati a
+parte; nel modello sono scritti come righe di $A$, il che è equivalente.
+
+\section{Il problema completo}\label{sec:completo}
+
+Le sezioni dalla~\ref{sec:vincolo-tensione} alla~\ref{sec:rimanenti} hanno
+ricavato i pezzi del problema uno alla volta, ciascuno con la sua
+giustificazione. Qui sono rimessi in fila, senza più giustificazioni, come una
+procedura da eseguire: quali elementi di $H$, $f$, $A$ e $b$ si scrivono, in
+quale ordine e con quale valore. È la stessa procedura che segue il codice.
+
+\subsection{Dimensioni e posizioni}\label{sec:dimensioni}
+
+Prima di riempire le matrici bisogna sapere quanto sono grandi e dove sta ogni
+incognita. Indicando con $t = 1, 2, 3$ la formulazione ($J_t$, $J_m$,
+$J_\Delta$), il numero di incognite e il numero di vincoli di disuguaglianza
+sono
+\begin{equation}
+  n_z = N + (t-1)\,p + 1 , \qquad
+  n_{dis} = t\,pN + 2N + 1 .
+  \label{eq:ndis}
+\end{equation}
+Il primo conta le $N$ correnti, le $(t-1)\,p$ variabili $\varepsilon$ e la
+variabile $e$. Il secondo conta $t$ blocchi di $pN$ vincoli (quello di tensione
+minima, più uno per i minoranti e uno per i maggioranti quando ci sono), i
+$2N$ limiti di corrente e il segno di $e$. Con i valori del progetto, $N = 3$
+e $p = 30$: 4 incognite e 97 vincoli per $J_t$, 34 e 187 per $J_m$, 64 e 277
+per $J_\Delta$.
+
+La posizione di un'incognita nel vettore $z$ decide tre cose insieme: il
+numero della sua colonna in $A$ e in $A_{eq}$, il numero del suo elemento in
+$f$, e il numero del suo elemento sulla diagonale di $H$.
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+Incognita & & Posizione in $z$ & Presente in \\
+\midrule
+corrente $u^n$ & $n = 1,\dots,N$ & $n$ & $J_t$, $J_m$, $J_\Delta$ \\
+minorante $\varepsilon_j$ & $j = 1,\dots,p$ & $N + j$ & $J_m$, $J_\Delta$ \\
+maggiorante $\varepsilon_{p+j}$ & $j = 1,\dots,p$ & $N + p + j$ & $J_\Delta$ \\
+variabile $e$ & & $n_z$, l'ultima & $J_t$, $J_m$, $J_\Delta$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Costruzione di $H$ e di $f$}\label{sec:passi-costo}
+
+Si parte da una matrice $H$ di $n_z \times n_z$ zeri e da un vettore $f$ di
+$n_z$ zeri. Si scrivono poi, nell'ordine, solo gli elementi elencati qui sotto;
+tutti gli altri restano nulli.
+\begin{enumerate}
+  \item \emph{Penalità su $e$} (tutte le formulazioni). Si scrive l'elemento
+        della diagonale nella posizione di $e$, secondo la \eqref{eq:peso-e}:
+        \mbox{$H_{n_z n_z} = 2W$}.
+  \item \emph{Peso sulle correnti} (tutte le formulazioni). Per ogni cella
+        $n = 1,\dots,N$ si scrive, secondo la \eqref{eq:peso-u},
+        \mbox{$H_{nn} = 2\rho$}.
+  \item \emph{Inseguimento} (solo $J_t$). Per ogni cella $n = 1,\dots,N$ si
+        calcolano le due somme sui passi della \eqref{eq:jt-hf}; la prima si
+        aggiunge all'elemento già scritto al passo 2, la seconda va in $f$:
+        \[
+          H_{nn} = 2\rho + 2\sum_{j=1}^{p} D_{j,n}^2 , \qquad
+          f_n = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^0_{j,n} - r_j\bigr) .
+        \]
+  \item \emph{Minoranti} (solo $J_m$ e $J_\Delta$). Per ogni passo
+        $j = 1,\dots,p$ si scrive, secondo la \eqref{eq:jm-hf},
+        \mbox{$f_{N+j} = -1$}.
+  \item \emph{Maggioranti} (solo $J_\Delta$). Per ogni passo $j = 1,\dots,p$
+        si scrive, secondo la \eqref{eq:jd-hf}, \mbox{$f_{N+p+j} = +1$}.
+\end{enumerate}
+Nessun passo scrive fuori dalla diagonale di $H$: la matrice è diagonale in
+tutte e tre le formulazioni. Scrivendo per esteso la diagonale di $H$ e il
+vettore $f$, il risultato è
+\begin{align*}
+  J_t: \quad
+    & \operatorname{diag}(H) = \bigl(\, H_{11},\, \dots,\, H_{NN},\; 2W \,\bigr) ,
+    && f = \bigl(\, f_1,\, \dots,\, f_N,\; 0 \,\bigr) , \\[6pt]
+  J_m: \quad
+    & \operatorname{diag}(H) = \bigl(\, \underbrace{2\rho,\, \dots,\, 2\rho}_{N},\;
+        \underbrace{0,\, \dots,\, 0}_{p},\; 2W \,\bigr) ,
+    && f = \bigl(\, \underbrace{0,\, \dots,\, 0}_{N},\;
+        \underbrace{-1,\, \dots,\, -1}_{p},\; 0 \,\bigr) , \\[6pt]
+  J_\Delta: \quad
+    & \operatorname{diag}(H) = \bigl(\, \underbrace{2\rho,\, \dots,\, 2\rho}_{N},\;
+        \underbrace{0,\, \dots,\, 0}_{2p},\; 2W \,\bigr) ,
+    && f = \bigl(\, \underbrace{0,\, \dots,\, 0}_{N},\;
+        \underbrace{-1,\, \dots,\, -1}_{p},\;
+        \underbrace{+1,\, \dots,\, +1}_{p},\; 0 \,\bigr) ,
+\end{align*}
+dove per $J_t$ gli elementi $H_{nn}$ e $f_n$ sono quelli del passo 3.
+
+\subsection{Costruzione di $A$ e di $b$}\label{sec:passi-vincoli}
+
+Si parte da una matrice $A$ di $n_{dis} \times n_z$ zeri e da un vettore $b$ di
+$n_{dis}$ zeri. I vincoli si scrivono uno dopo l'altro, ciascuno in una riga
+nuova, cominciando dalla prima. Scrivere un vincolo nella riga $q$ significa
+due cose: mettere i suoi coefficienti negli elementi $A_{q,i}$, dove $i$ è la
+posizione delle incognite che vi compaiono, e mettere il suo termine noto in
+$b_q$. I vincoli si susseguono in sei blocchi, in quest'ordine.
+\begin{enumerate}
+  \item \emph{Tensione minima} (tutte le formulazioni),
+        \eqref{eq:riga-tensione}. Per ogni cella $n = 1,\dots,N$ e, al suo
+        interno, per ogni passo $j = 1,\dots,p$, una riga con $-D_{j,n}$ nella
+        colonna di $u^n$ e $-1$ nella colonna di $e$; in $b$ va
+        $Y^0_{j,n} - y_{\min}$.
+  \item \emph{Minoranti} (solo $J_m$ e $J_\Delta$),
+        \eqref{eq:riga-minorante}. Con lo stesso doppio ciclo, una riga con
+        $-D_{j,n}$ nella colonna di $u^n$ e $+1$ nella colonna di
+        $\varepsilon_j$; in $b$ va $Y^0_{j,n}$.
+  \item \emph{Maggioranti} (solo $J_\Delta$), \eqref{eq:riga-maggiorante}.
+        Ancora lo stesso doppio ciclo, una riga con $D_{j,n}$ nella colonna di
+        $u^n$ e $-1$ nella colonna di $\varepsilon_{p+j}$; in $b$ va
+        $-Y^0_{j,n}$.
+  \item \emph{Limite superiore delle correnti} (tutte le formulazioni),
+        \eqref{eq:riga-limiti}. Per ogni cella $n$, una riga con $+1$ nella
+        colonna di $u^n$; in $b$ va $u_{\max}$.
+  \item \emph{Limite inferiore delle correnti} (tutte le formulazioni),
+        \eqref{eq:riga-limiti}. Per ogni cella $n$, una riga con $-1$ nella
+        colonna di $u^n$; in $b$ va $-u_{\min}$.
+  \item \emph{Segno di $e$} (tutte le formulazioni), \eqref{eq:riga-e}. Una
+        sola riga, con $-1$ nella colonna di $e$; in $b$ va $0$.
+\end{enumerate}
+Nei primi tre blocchi i vincoli sono quindi ordinati per cella: prima i $p$
+passi della cella 1, poi quelli della cella 2, e così via. La tabella riassume
+la procedura in formule: per ogni blocco dà il numero $q$ della riga in cui va
+il vincolo, i coefficienti da scrivere in quella riga e il termine noto.
+
+\begin{center}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lllll}
+\toprule
+Blocco & Riga $q$ & Colonna di $u^n$ & Altra colonna & Termine noto \\
+\midrule
+1. Tensione minima & $(n-1)\,p + j$ & $A_{q,n} = -D_{j,n}$ & $A_{q,n_z} = -1$ & $b_q = Y^0_{j,n} - y_{\min}$ \\
+2. Minoranti & $pN + (n-1)\,p + j$ & $A_{q,n} = -D_{j,n}$ & $A_{q,N+j} = +1$ & $b_q = Y^0_{j,n}$ \\
+3. Maggioranti & $2pN + (n-1)\,p + j$ & $A_{q,n} = D_{j,n}$ & $A_{q,N+p+j} = -1$ & $b_q = -Y^0_{j,n}$ \\
+4. Limite superiore & $t\,pN + n$ & $A_{q,n} = +1$ & --- & $b_q = u_{\max}$ \\
+5. Limite inferiore & $t\,pN + N + n$ & $A_{q,n} = -1$ & --- & $b_q = -u_{\min}$ \\
+6. Segno di $e$ & $t\,pN + 2N + 1$ & --- & $A_{q,n_z} = -1$ & $b_q = 0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Nella tabella $t$ è ancora la formulazione: i blocchi 4, 5 e 6 vengono subito
+dopo l'ultimo blocco da $pN$ righe presente, cioè dopo $t\,pN$ righe. L'ultima
+riga scritta ha numero $t\,pN + 2N + 1 = n_{dis}$, come previsto dalla
+\eqref{eq:ndis}. Nel codice non serve calcolare il numero di riga con queste
+formule: basta un contatore che parte da zero e avanza di uno a ogni vincolo
+scritto.
+
+Resta il vincolo di uguaglianza \eqref{eq:uguaglianza}, che è una riga sola:
+$A_{eq}$ ha $1$ nelle colonne delle correnti, cioè nelle prime $N$, e zero
+nelle altre; $b_{eq} = 0$.
+
+\subsection{Il risultato a colpo d'occhio}\label{sec:blocchi}
+
+La matrice $A$ costruita in questo modo ha una struttura a blocchi, che si
+vede bene con tre simboli. Sia $y^0$ il vettore di lunghezza $pN$ ottenuto
+mettendo in fila le colonne di $Y^0$, cioè nell'ordine in cui sono scritti i
+vincoli; $\Dc$ la matrice $pN \times N$ che ha, nella colonna $n$, i
+coefficienti $D_{1,n}, \dots, D_{p,n}$ in corrispondenza delle righe della
+cella $n$, e zeri altrove; $\Pc$ la matrice $pN \times p$ formata da $N$ copie
+della matrice identità $I_p$, una sopra l'altra:
+\[
+  y^0 = \begin{bmatrix} Y^0_{\cdot,1} \\ \vdots \\ Y^0_{\cdot,N} \end{bmatrix},
+  \qquad
+  \Dc = \begin{bmatrix}
+          D_{\cdot,1} & & \\
+          & \ddots & \\
+          & & D_{\cdot,N}
+        \end{bmatrix},
+  \qquad
+  \Pc = \begin{bmatrix} I_p \\ \vdots \\ I_p \end{bmatrix},
+\]
+dove $D_{\cdot,n}$ e $Y^0_{\cdot,n}$ sono le colonne $n$ di $D$ e di $Y^0$.
+Con $\uno$ si indica un vettore di tutti uni. Per $J_\Delta$, la formulazione
+più ricca, le incognite sono nell'ordine le correnti $u$, i minoranti
+$\varepsilon_{1..p}$, i maggioranti $\varepsilon_{p+1..2p}$ ed $e$, e i vincoli
+di disuguaglianza sono
+\[
+  \underbrace{
+  \bordermatrix{
+      & u & \varepsilon_{1..p} & \varepsilon_{p+1..2p} & e \cr
+    \text{1. tensione minima} & -\Dc & 0 & 0 & -\uno \cr
+    \text{2. minoranti}       & -\Dc & \Pc & 0 & 0 \cr
+    \text{3. maggioranti}     & \Dc & 0 & -\Pc & 0 \cr
+    \text{4. limite superiore} & I_N & 0 & 0 & 0 \cr
+    \text{5. limite inferiore} & -I_N & 0 & 0 & 0 \cr
+    \text{6. segno di } e     & 0 & 0 & 0 & -1 \cr
+  }}_{A}
+  \; z \;\le\;
+  \underbrace{
+  \begin{bmatrix}
+    y^0 - y_{\min}\,\uno \\ y^0 \\ -y^0 \\ u_{\max}\,\uno \\ -u_{\min}\,\uno \\ 0
+  \end{bmatrix}}_{b} .
+\]
+Ogni riga di questo schema è uno dei sei blocchi della procedura, e ogni
+colonna un gruppo di incognite. Per $J_m$ si tolgono la riga dei maggioranti e
+la colonna di $\varepsilon_{p+1..2p}$; per $J_t$ anche la riga dei minoranti e
+la colonna di $\varepsilon_{1..p}$. Due cose si vedono a colpo d'occhio: $A$ è
+quasi tutta fatta di zeri, con al più due coefficienti non nulli per riga, e
+le correnti delle diverse celle non compaiono mai nello stesso vincolo di
+disuguaglianza. Le lega soltanto il vincolo di uguaglianza.
+
+\subsection{Una forma condensata}
+
+Nel QP compaiono come incognite solo le correnti, oltre alle variabili di
+servizio: gli stati delle celle lungo l'orizzonte non sono incognite, perché
+la \eqref{eq:pred} li ha già espressi in funzione di $u$. È la cosiddetta
+forma \emph{condensata}. Il paper conta invece $(2p+1)N$ incognite per $J_t$:
+alle $N$ correnti si aggiungono i due stati di ogni cella a ogni passo, cioè
+$2pN$ numeri, legati alle correnti da vincoli di uguaglianza. Le due forme
+hanno la stessa soluzione; quella condensata è più piccola.
+
+\section{Il punto di partenza}\label{sec:partenza}
+
+Il blocco prepara anche un punto $z_0$ da cui il solutore parte. È la mossa
+del passo precedente, completata con i valori delle variabili di servizio che
+la rendono ammissibile:
+\begin{equation}
+  u = \bar u , \qquad
+  \varepsilon_j = \min_{n}\, \bar Y_{j,n} , \qquad
+  \varepsilon_{p+j} = \max_{n}\, \bar Y_{j,n} , \qquad
+  e = \max\Bigl(0,\; y_{\min} - \min_{j,n}\, \bar Y_{j,n}\Bigr) .
+  \label{eq:z0}
+\end{equation}
+
+\paragraph{Perché è ammissibile.} Tutto dipende da un'osservazione: nel punto
+$u = \bar u$ la predizione linearizzata vale esattamente $\bar Y$. Infatti per
+la \eqref{eq:pred}
+$Y^0_{j,n} + D_{j,n}\,\bar u^n = \bar Y_{j,n}$. I vincoli si controllano
+allora uno per uno.
+\begin{itemize}
+  \item \emph{Tensione minima} \eqref{eq:morbido}: serve
+        $\bar Y_{j,n} + e \ge y_{\min}$ per ogni coppia. Vale perché
+        $e \ge y_{\min} - \min_{j,n} \bar Y_{j,n} \ge y_{\min} - \bar Y_{j,n}$.
+  \item \emph{Minoranti e maggioranti}: $\varepsilon_j$ è la più bassa delle
+        tensioni $\bar Y_{j,1}, \dots, \bar Y_{j,N}$, quindi non ne supera
+        nessuna; $\varepsilon_{p+j}$ è la più alta, quindi nessuna la supera.
+  \item \emph{Segno di $e$}: $e$ è il massimo tra zero e un altro numero.
+  \item \emph{Limiti e somma delle correnti}: $\bar u$ è la soluzione del QP
+        del passo precedente, che rispettava \eqref{eq:limiti} e
+        \eqref{eq:somma}. Al primo passo del modello $\bar u = 0$, che le
+        rispetta purché $u_{\min} \le 0 \le u_{\max}$.
+\end{itemize}
+
+\paragraph{A che cosa serve.} Ha due usi. Il primo è dare al metodo
+active-set un punto da cui partire (sezione~\ref{sec:attivi}): un punto già
+ammissibile, e di solito vicino alla soluzione, perché le correnti di
+bilanciamento cambiano poco da un passo all'altro. Il secondo è di sicurezza:
+se \texttt{quadprog} non restituisce una soluzione, il blocco
+\file{Solutore_QP} restituisce $z_0$, cioè mantiene la mossa precedente.
+``Continuare come prima'' è sempre una scelta ammissibile.
+
+\section{Proprietà del problema}\label{sec:proprieta}
+
+Con i richiami della sezione~\ref{sec:convessita} si può ora dire che tipo di
+problema è stato costruito.
+\begin{itemize}
+  \item \emph{È convesso.} $H$ è diagonale e i suoi elementi sono
+        $2\rho$ (più una somma di quadrati per $J_t$), zero oppure $2W$:
+        nessuno è negativo, quindi $H$ è semidefinita positiva. Ogni minimo
+        locale è globale.
+  \item \emph{Ha punti ammissibili.} Uno è $z_0$.
+  \item \emph{Ha una soluzione.} Per $J_t$ tutti gli elementi della diagonale
+        sono positivi: $H$ è definita positiva e la soluzione esiste. Per
+        $J_m$ e $J_\Delta$ $H$ ha degli zeri sulla diagonale, ma il costo è
+        limitato inferiormente. Le correnti sono limitate dalla
+        \eqref{eq:limiti}, quindi lo sono le tensioni predette: i minoranti
+        $\varepsilon_j$ non possono salire oltre un certo valore e i
+        maggioranti $\varepsilon_{p+j}$ non possono scendere sotto un altro.
+        Gli addendi $-\varepsilon_j$ e $+\varepsilon_{p+j}$ hanno quindi un
+        limite inferiore, e gli altri addendi del costo non sono mai negativi.
+  \item \emph{La soluzione è unica.} Per $J_t$ segue dal fatto che $H$ è
+        definita positiva. Per $J_m$ e $J_\Delta$ serve un argomento in più.
+        Se ci fossero due soluzioni diverse, per la convessità sarebbero
+        soluzioni anche tutti i punti del segmento che le unisce, e lungo il
+        segmento il costo sarebbe costante. Ma lungo un segmento il costo è un
+        polinomio di secondo grado nel parametro che lo percorre, e il
+        coefficiente del termine di secondo grado è
+        $\rho \sum_n (\Delta u^n)^2 + W\,(\Delta e)^2$, dove $\Delta u$ e
+        $\Delta e$ sono le differenze tra le due soluzioni. Il costo può essere
+        costante solo se questo coefficiente è nullo, cioè se le due soluzioni
+        hanno le stesse correnti e la stessa $e$. Fissata $u$, d'altra parte, i
+        valori migliori delle $\varepsilon$ sono determinati: il minimo e il
+        massimo tra le celle. Le due soluzioni coincidono.
+\end{itemize}
+C'è infine una ragione per cui nel modello si usa il metodo active-set. In
+$J_m$ e $J_\Delta$ il costo è di primo grado nelle $\varepsilon$, e nella
+soluzione ogni $\varepsilon$ sta esattamente su un vincolo, cioè sulla tensione
+di una cella. Un metodo che lavora con i vincoli attivi individua questi
+vincoli in modo esatto, invece di avvicinarvisi soltanto.
+
+\section{Se si bilancia il SOC}\label{sec:soc}
+
+Tutto il documento è scritto per $\sigma = y$. Se la grandezza bilanciata è il
+SOC, serve anche la sua predizione linearizzata, che arriva dallo stesso
+blocco di quella della tensione:
+\[
+  s^n_{k+j}(u^n) = S^0_{j,n} + E_{j,n}\,u^n ,
+  \qquad
+  S^0_{j,n} = \bar S_{j,n} - E_{j,n}\,\bar u^n .
+\]
+Il riferimento $r_j$ diventa il SOC della cella nominale. Le sostituzioni da
+fare sono due, e riguardano solo le parti che contengono $\sigma$.
+\begin{itemize}
+  \item \emph{Nel costo e nei vincoli sulle $\varepsilon$}, cioè nelle
+        \eqref{eq:jt-hf}, \eqref{eq:riga-minorante} e
+        \eqref{eq:riga-maggiorante}, al posto di $Y^0$ e $D$ si usano $S^0$ ed
+        $E$. Nel punto di partenza \eqref{eq:z0} le $\varepsilon$ si calcolano
+        da $\bar S$ invece che da $\bar Y$.
+  \item \emph{Il vincolo di tensione minima} \eqref{eq:riga-tensione} e il
+        valore di $e$ nella \eqref{eq:z0} restano com'erano: il vincolo
+        \eqref{eq:tensione} riguarda sempre la tensione, qualunque sia la
+        grandezza bilanciata.
+\end{itemize}
+In questo caso il blocco usa quindi tutte e quattro le matrici $\bar Y$,
+$\bar S$, $D$, $E$. Va notato che per il SOC la retta non è
+un'approssimazione: il SOC è esattamente di primo grado nella corrente, finché
+la cella non è piena [L,~sezione~5].
+
+\section{Esempio numerico}\label{sec:esempio}
+
+Per vedere i simboli diventare numeri si considera un caso piccolo, con valori
+scelti per fare i conti a mano: $N = 2$ celle e $p = 2$ passi. I dati sono
+\[
+  \bar Y = \begin{bmatrix} 3{,}700 & 3{,}660 \\ 3{,}690 & 3{,}648 \end{bmatrix}
+  \text{V} , \quad
+  D = \begin{bmatrix} -0{,}010 & -0{,}011 \\ -0{,}012 & -0{,}013 \end{bmatrix}
+  \frac{\text{V}}{\text{A}} , \quad
+  \bar u = \begin{bmatrix} 0{,}5 \\ -0{,}5 \end{bmatrix} \text{A} , \quad
+  r = \begin{bmatrix} 3{,}680 \\ 3{,}669 \end{bmatrix} \text{V} ,
+\]
+con $y_{\min} = 3{,}2$~V, $u_{\min} = -2$~A, $u_{\max} = 2$~A e $W = 1000$. La
+cella 1 (prima colonna) è la più alta, la cella 2 la più bassa.
+
+\paragraph{Risposta libera.} Dalla \eqref{eq:pred},
+$Y^0_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n$:
+\[
+  Y^0 = \begin{bmatrix}
+          3{,}700 + 0{,}010 \cdot 0{,}5 & 3{,}660 - 0{,}011 \cdot 0{,}5 \\
+          3{,}690 + 0{,}012 \cdot 0{,}5 & 3{,}648 - 0{,}013 \cdot 0{,}5
+        \end{bmatrix}
+      = \begin{bmatrix} 3{,}7050 & 3{,}6545 \\ 3{,}6960 & 3{,}6415 \end{bmatrix}
+      \text{V} .
+\]
+Senza bilanciamento la cella 1 starebbe un po' più in alto di quanto dice
+$\bar Y$, e la cella 2 un po' più in basso: la mossa precedente stava già
+avvicinando le due celle.
+
+\paragraph{$J_t$: costruzione di $H$ e di $f$.} Le incognite sono
+$z = (u^1, u^2, e)$: $n_z = 3$, le correnti occupano le posizioni 1 e 2 ed
+$e$ la posizione 3. Si seguono i passi della sezione~\ref{sec:passi-costo},
+con $\rho = 10^{-4}$.
+\begin{enumerate}
+  \item Penalità su $e$: $H_{33} = 2W = 2000$.
+  \item Peso sulle correnti: $H_{11} = H_{22} = 2\rho = 2 \cdot 10^{-4}$.
+  \item Inseguimento: a ciascuno dei due elementi si aggiunge la somma sui
+        passi, e si calcolano $f_1$ e $f_2$:
+        \begin{align*}
+          H_{11} &= 2 \cdot 10^{-4} + 2\,(0{,}010^2 + 0{,}012^2)
+                  = 6{,}88 \cdot 10^{-4} , \\
+          H_{22} &= 2 \cdot 10^{-4} + 2\,(0{,}011^2 + 0{,}013^2)
+                  = 7{,}80 \cdot 10^{-4} , \\
+          f_1 &= 2\,\bigl[(-0{,}010) \cdot 0{,}0250 + (-0{,}012) \cdot 0{,}0270\bigr]
+                  = -1{,}148 \cdot 10^{-3} , \\
+          f_2 &= 2\,\bigl[(-0{,}011) \cdot (-0{,}0255) + (-0{,}013) \cdot (-0{,}0275)\bigr]
+                  = 1{,}276 \cdot 10^{-3} .
+        \end{align*}
+\end{enumerate}
+I numeri $0{,}0250$ e $0{,}0270$ sono gli scarti $Y^0_{j,1} - r_j$ della cella
+1, che sta sopra il riferimento; quelli della cella 2, che sta sotto, sono
+$-0{,}0255$ e $-0{,}0275$. I passi 4 e 5 non riguardano $J_t$. In tutto:
+\[
+  H = \begin{bmatrix}
+        6{,}88 \cdot 10^{-4} & 0 & 0 \\
+        0 & 7{,}80 \cdot 10^{-4} & 0 \\
+        0 & 0 & 2000
+      \end{bmatrix} ,
+  \qquad
+  f = \begin{bmatrix} -1{,}148 \cdot 10^{-3} \\ 1{,}276 \cdot 10^{-3} \\ 0 \end{bmatrix} .
+\]
+
+\paragraph{$J_t$: costruzione di $A$ e di $b$.} I vincoli di disuguaglianza
+sono $n_{dis} = 1 \cdot 4 + 4 + 1 = 9$. Seguendo i blocchi della
+sezione~\ref{sec:passi-vincoli}: il blocco 1 occupa le righe da 1 a 4, i
+blocchi 4 e 5 le righe da 5 a 8, il blocco 6 la riga 9. I blocchi 2 e 3 non ci
+sono.
+\[
+  \bordermatrix{
+      & u^1 & u^2 & e \cr
+    \text{1:\; tensione, cella 1, } j = 1 & 0{,}010 & 0 & -1 \cr
+    \text{2:\; tensione, cella 1, } j = 2 & 0{,}012 & 0 & -1 \cr
+    \text{3:\; tensione, cella 2, } j = 1 & 0 & 0{,}011 & -1 \cr
+    \text{4:\; tensione, cella 2, } j = 2 & 0 & 0{,}013 & -1 \cr
+    \text{5:\; limite superiore, cella 1} & 1 & 0 & 0 \cr
+    \text{6:\; limite superiore, cella 2} & 0 & 1 & 0 \cr
+    \text{7:\; limite inferiore, cella 1} & -1 & 0 & 0 \cr
+    \text{8:\; limite inferiore, cella 2} & 0 & -1 & 0 \cr
+    \text{9:\; segno di } e & 0 & 0 & -1 \cr
+  }
+  \begin{bmatrix} u^1 \\ u^2 \\ e \end{bmatrix}
+  \;\le\;
+  \begin{bmatrix}
+    0{,}5050 \\ 0{,}4960 \\ 0{,}4545 \\ 0{,}4415 \\ 2 \\ 2 \\ 2 \\ 2 \\ 0
+  \end{bmatrix} .
+\]
+Il numero davanti a ogni riga è il numero $q$ della
+sezione~\ref{sec:passi-vincoli}: per esempio il vincolo di tensione della
+cella 2 al passo 1 sta nella riga $(n-1)\,p + j = (2-1) \cdot 2 + 1 = 3$. Nelle
+prime quattro righe i coefficienti $0{,}010$, $0{,}012$, \dots\ sono
+$-D_{j,n}$, scritti nella colonna della cella a cui si riferiscono, e i termini
+noti sono i margini $Y^0_{j,n} - 3{,}2$. Il vincolo di uguaglianza è
+$A_{eq} = [\,1 \;\; 1 \;\; 0\,]$, $b_{eq} = 0$, e il punto di partenza è
+$z_0 = (0{,}5;\; -0{,}5;\; 0)$.
+
+\paragraph{La soluzione per $J_t$.} Senza vincoli le due parabole avrebbero il
+minimo in $u^1 = -f_1/H_{11} = 1{,}669$~A e $u^2 = -f_2/H_{22} = -1{,}636$~A:
+la cella alta andrebbe scaricata di più, la bassa di meno. La somma però non
+è nulla. Imponendo $u^2 = -u^1$ e rendendo minimo il costo rispetto alla sola
+$u^1$ si ottiene
+\[
+  u^1 = \frac{f_2 - f_1}{H_{11} + H_{22}} = 1{,}651~\text{A} , \qquad
+  u^2 = -1{,}651~\text{A} , \qquad e = 0 ,
+\]
+che rispetta i limiti di $\pm 2$~A. Le tensioni predette con queste correnti
+vanno da 3,663 a 3,688~V: sono lontane da $y_{\min}$, quindi il vincolo di
+tensione non interviene ed $e = 0$. È il risultato che restituisce
+\texttt{quadprog}.
+
+\paragraph{Che cosa cambia per $J_m$.} Le incognite diventano
+$z = (u^1, u^2, \varepsilon_1, \varepsilon_2, e)$: $n_z = 5$, i minoranti
+occupano le posizioni 3 e 4 ed $e$ la posizione 5. Per $H$ e $f$ si eseguono
+i passi 1, 2 e 4 della sezione~\ref{sec:passi-costo}:
+\[
+  \operatorname{diag}(H) = \bigl(\, 2\rho,\; 2\rho,\; 0,\; 0,\; 2000 \,\bigr) ,
+  \qquad
+  f = \bigl(\, 0,\; 0,\; -1,\; -1,\; 0 \,\bigr) .
+\]
+Per $A$ e $b$ compare il blocco 2, subito dopo quello di tensione. Le prime
+quattro righe sono quelle di prima, con il $-1$ di $e$ che ora sta nella
+quinta colonna; seguono le righe da 5 a 8,
+\[
+  \bordermatrix{
+      & u^1 & u^2 & \varepsilon_1 & \varepsilon_2 & e \cr
+    \text{5:\; minorante, cella 1, } j = 1 & 0{,}010 & 0 & 1 & 0 & 0 \cr
+    \text{6:\; minorante, cella 1, } j = 2 & 0{,}012 & 0 & 0 & 1 & 0 \cr
+    \text{7:\; minorante, cella 2, } j = 1 & 0 & 0{,}011 & 1 & 0 & 0 \cr
+    \text{8:\; minorante, cella 2, } j = 2 & 0 & 0{,}013 & 0 & 1 & 0 \cr
+  }
+  \; z \;\le\;
+  \begin{bmatrix} 3{,}7050 \\ 3{,}6960 \\ 3{,}6545 \\ 3{,}6415 \end{bmatrix} ,
+\]
+e poi i limiti di corrente, che scendono alle righe da 9 a 12, e il segno di
+$e$, alla riga 13. In ogni riga del blocco 2 il coefficiente $+1$ sta nella
+colonna del minorante del passo corrispondente: $\varepsilon_1$ per $j = 1$,
+$\varepsilon_2$ per $j = 2$. Il punto di partenza è
+$z_0 = (0{,}5;\; -0{,}5;\; 3{,}660;\; 3{,}648;\; 0)$: le due $\varepsilon$
+sono le tensioni $\bar Y$ della cella più bassa.
+
+\paragraph{Che cosa cambia per $J_\Delta$.} Le incognite diventano
+$z = (u^1, u^2, \varepsilon_1, \varepsilon_2, \varepsilon_3, \varepsilon_4, e)$:
+$n_z = 7$, i maggioranti occupano le posizioni 5 e 6 ed $e$ la posizione 7.
+Ai passi di $J_m$ si aggiunge il passo 5, quindi
+$\operatorname{diag}(H) = (\, 2\rho,\, 2\rho,\, 0,\, 0,\, 0,\, 0,\, 2000 \,)$ e
+$f = (\, 0,\, 0,\, -1,\, -1,\, +1,\, +1,\, 0 \,)$. In $A$ compare anche il
+blocco 3, nelle righe da 9 a 12,
+\[
+  \bordermatrix{
+      & u^1 & u^2 & \varepsilon_1 & \varepsilon_2 & \varepsilon_3 & \varepsilon_4 & e \cr
+    \text{9:\; maggiorante, cella 1, } j = 1 & -0{,}010 & 0 & 0 & 0 & -1 & 0 & 0 \cr
+    \text{10:\; maggiorante, cella 1, } j = 2 & -0{,}012 & 0 & 0 & 0 & 0 & -1 & 0 \cr
+    \text{11:\; maggiorante, cella 2, } j = 1 & 0 & -0{,}011 & 0 & 0 & -1 & 0 & 0 \cr
+    \text{12:\; maggiorante, cella 2, } j = 2 & 0 & -0{,}013 & 0 & 0 & 0 & -1 & 0 \cr
+  }
+  \; z \;\le\;
+  \begin{bmatrix} -3{,}7050 \\ -3{,}6960 \\ -3{,}6545 \\ -3{,}6415 \end{bmatrix} ,
+\]
+mentre i limiti di corrente scendono alle righe da 13 a 16 e il segno di $e$
+alla riga 17. Il punto di partenza è
+$z_0 = (0{,}5;\; -0{,}5;\; 3{,}660;\; 3{,}648;\; 3{,}700;\; 3{,}690;\; 0)$.
+
+\paragraph{Le tre soluzioni a confronto.} Come nel progetto, il peso $\rho$ è
+diverso per le tre formulazioni: $10^{-4}$ per $J_t$, $5 \cdot 10^{-3}$ per
+$J_m$, $10^{-2}$ per $J_\Delta$. Le soluzioni di \texttt{quadprog} sono:
+
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+ & $u^1$ [A] & $u^2$ [A] & $\varepsilon_1$;\; $\varepsilon_2$ [V] & $\varepsilon_3$;\; $\varepsilon_4$ [V] & $e$ [V] \\
+\midrule
+$J_t$ & $\phantom{-}1{,}651$ & $-1{,}651$ & --- & --- & 0 \\
+$J_m$ & $\phantom{-}1{,}200$ & $-1{,}200$ & 3,66770;\; 3,65710 & --- & 0 \\
+$J_\Delta$ & $\phantom{-}1{,}150$ & $-1{,}150$ & 3,66715;\; 3,65645 & 3,69350;\; 3,68220 & 0 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+In tutti e tre i casi $e = 0$: le tensioni predette sono lontane da
+$y_{\min}$ e il vincolo di tensione non interviene. Il bilanciatore preleva
+corrente dalla cella alta e la cede a quella bassa, in quantità diverse perché
+diversi sono i criteri.
+
+Nelle ultime due righe si riconosce il meccanismo delle sezioni~\ref{sec:jm}
+e~\ref{sec:jd}: i minoranti si sono fermati sulle tensioni della cella più
+bassa, $\varepsilon_j = Y^0_{j,2} + D_{j,2}\,u^2$, e i maggioranti su quelle
+della più alta. Per $J_m$, per esempio,
+$\varepsilon_1 = 3{,}6545 + 0{,}011 \cdot 1{,}2 = 3{,}6677$~V. Nel linguaggio
+della sezione~\ref{sec:attivi}, i vincoli sui minoranti della cella 2 sono
+attivi, mentre quelli della cella 1, che sta più in alto, non lo sono; per
+$J_\Delta$ sono attivi anche i vincoli sui maggioranti della cella 1. In tutti
+e tre i casi è attivo il vincolo $e \ge 0$, e nessun limite di corrente.
+
+\section{Dove si trova nel codice}\label{sec:codice}
+
+Il blocco \file{Problema_QP} chiama una funzione che riceve la predizione e
+restituisce le matrici. Ne esistono due versioni, con gli stessi ingressi e le
+stesse uscite:
+\begin{itemize}
+  \item \file{qp_problema.m} riempie le matrici a blocchi, con operazioni su
+        vettori;
+  \item \file{problema_qp_semplice.m} le riempie un elemento alla volta, per
+        una cella e un passo per volta, ed è diviso nelle stesse parti di
+        questo documento: è la versione da leggere.
+\end{itemize}
+Le due funzioni producono le stesse matrici, e nel blocco si possono
+scambiare: per usare la versione da leggere basta che il blocco contenga
+l'istruzione
+{\small
+\begin{verbatim}
+    [H, f, A, b, Aeq, beq, z0] = ...
+        problema_qp_semplice(sl, sigma0, Y, S, dY, dS, u_prec);
+\end{verbatim}
+}
+\noindent
+dove \texttt{sigma0}, \texttt{dY}, \texttt{dS} e \file{u_prec} sono i nomi che
+il riferimento $r$, le matrici $D$ ed $E$ e la mossa $\bar u$ hanno nel
+modello. La versione da leggere esegue la procedura della
+sezione~\ref{sec:completo} nello stesso ordine: ogni vincolo è scritto in una
+riga nuova di \texttt{A}, e la variabile \texttt{q} è il contatore di righe
+della sezione~\ref{sec:passi-vincoli}, che avanza di uno a ogni vincolo. Le
+variabili hanno il nome dei simboli del documento:
+
+\begin{center}
+\begin{tabular}{ll@{\qquad}ll}
+\toprule
+Simbolo & Nome nel codice & Simbolo & Nome nel codice \\
+\midrule
+$\bar Y$, $D$ & \texttt{Y}, \texttt{D} & $H$, $f$ & \texttt{H}, \texttt{f} \\
+$\bar S$, $E$ & \texttt{S}, \texttt{E} & $A$, $b$ & \texttt{A}, \texttt{b} \\
+$Y^0$ & \texttt{Y0} & $A_{eq}$, $b_{eq}$ & \texttt{Aeq}, \texttt{beq} \\
+$\bar u$ & \file{u_bar} & $z_0$ & \texttt{z0} \\
+$r_j$ & \texttt{r(j)} & $n_z$, $n_{dis}$ & \file{n_z}, \file{n_dis} \\
+$\rho$, $W$ & \texttt{rho}, \texttt{W} & posizione di $e$ in $z$ & \file{i_e} \\
+$y_{\min}$, $u_{\min}$, $u_{\max}$ & \file{y_min}, \file{u_min}, \file{u_max} & formulazione $t$ & \texttt{tipo} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Nel costo e nei vincoli sulle $\varepsilon$ il codice usa \texttt{Yb},
+\texttt{Db} e \texttt{Yb0} (``b'' per ``bilanciata''): coincidono con
+\texttt{Y}, \texttt{D} e \texttt{Y0} se si bilancia la tensione, e con le
+grandezze corrispondenti del SOC altrimenti (sezione~\ref{sec:soc}). I
+parametri arrivano dalla struttura \texttt{sl}, creata da
+\file{init_simulink.m}: $\rho$ è \texttt{sl.r}, la formulazione è
+\texttt{sl.tipo}.
+
+\end{document}

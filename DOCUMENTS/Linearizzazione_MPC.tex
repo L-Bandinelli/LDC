@@ -1,0 +1,1323 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[margin=2.5cm]{geometry}
+
+% Sezioni e sottosezioni sono numerate; i titoli di livello inferiore no
+\setcounter{secnumdepth}{2}
+
+\newcommand{\file}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\Tc}{T_c}
+\newcommand{\nom}{\mathrm{nom}}
+
+\title{Linearizzazione della predizione\\nell'MPC di bilanciamento attivo}
+\author{Modello Simulink \file{Bilanciamento_MPC.slx}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent
+Questo documento descrive come il sottosistema \file{Controllo} del modello
+Simulink trasforma il problema di controllo ottimo del paper di Chen, Behal e
+Li (IEEE CDC 2021) in un problema quadratico, e in particolare come calcola le
+derivate che servono per farlo.
+
+\section{Perché serve linearizzare}
+
+A ogni passo di controllo l'MPC risolve il problema (eq.~6): scegliere le
+correnti di bilanciamento $u^1,\dots,u^N$, costanti su tutto l'orizzonte, che
+minimizzano un costo costruito sulle tensioni predette delle celle. Le tensioni
+predette dipendono da $u$ attraverso il modello di cella, che non è lineare: i
+parametri $V_{oc}$, $R_o$, $R_p$, $C_p$ dipendono dallo stato di carica.
+
+Se il modello fosse lineare, le tensioni predette sarebbero funzioni lineari
+di $u$: il costo sarebbe quadratico, i vincoli lineari, e il problema un
+programma quadratico (QP), per cui esistono solutori rapidi e affidabili come
+\texttt{quadprog}. Con il modello non lineare questo non vale più. Il paper
+(Remark~3) osserva però che basta linearizzare il modello di predizione a ogni
+passo perché il problema torni a essere un QP. È quello che fa il modello
+Simulink, in due blocchi: \file{Predizione_linearizzata} calcola la predizione
+e le sue derivate, \file{Problema_QP} le inserisce in costo e vincoli.
+
+L'idea è questa. A ogni passo si calcola come evolverebbero le celle se le
+correnti di bilanciamento restassero quelle del passo precedente, e di quanto
+questa evoluzione cambierebbe per ogni ampere in più. Con queste due
+informazioni la tensione predetta di ogni cella è approssimata da una retta
+nella sua corrente di bilanciamento, e il problema diventa un QP.
+
+Il documento segue lo stesso percorso:
+\begin{itemize}
+  \item la sezione~\ref{sec:modello} presenta il modello di predizione, prima
+        a tempo continuo e poi nella forma discreta usata dall'MPC;
+  \item la sezione~\ref{sec:punto} fissa il punto attorno a cui si linearizza;
+  \item la sezione~\ref{sec:sviluppo} scrive la retta e individua i
+        coefficienti che restano da calcolare;
+  \item la sezione~\ref{sec:derivate} li calcola: è la parte centrale del
+        documento;
+  \item la sezione~\ref{sec:qp} li inserisce nel costo e nei vincoli del QP;
+  \item le ultime tre sezioni riepilogano un passo di controllo, discutono
+        l'accuratezza e indicano dove si trova ogni passaggio nel codice.
+\end{itemize}
+
+\paragraph{Convenzioni.} In tutto il documento valgono le convenzioni
+seguenti.
+\begin{itemize}
+  \item \emph{Numeri di equazione.} ``eq.~6'' e ``Remark~3'' rimandano al
+        paper. I numeri tra sole parentesi, come (3), sono le equazioni di
+        questo documento che il codice applica, tutte a tempo discreto. Le
+        equazioni a tempo continuo, che servono a capire da dove vengono le
+        prime, sono numerate (C1), (C2), \dots; la (T) è la lettura delle
+        tabelle.
+  \item \emph{Indici.} $n = 1,\dots,N$ è la cella, scritta come indice in alto
+        ($u^n$, $I^n$) e sottintesa quando si parla di una cella sola; $k$ è
+        l'istante attuale; $j = 1,\dots,p$ è il passo lungo l'orizzonte; $t$ è
+        il tempo continuo, misurato a partire dall'istante attuale.
+  \item \emph{Derivate.} Il punto indica la derivata rispetto al tempo,
+        $\dot x = dx/dt$; l'apice la derivata rispetto al SOC,
+        $\tau' = d\tau/ds$.
+  \item \emph{Barra.} Una grandezza con la barra, come $\bar u$ o $\bar Y$, è
+        calcolata nel punto di linearizzazione (sezione~\ref{sec:punto}).
+  \item \emph{Correnti.} Sono positive in scarica.
+\end{itemize}
+
+\section{Modello di predizione}\label{sec:modello}
+
+Sia $k$ l'istante attuale, $\Tc$ il passo di controllo e $p$ l'orizzonte, cioè
+il numero di passi su cui si predice. Per la cella $n$ lo stato è la coppia
+$(s, V_p)$: stato di carica (SOC) e tensione di polarizzazione. La corrente
+della cella è la somma della corrente di pacco e di quella di bilanciamento
+(eq.~3),
+\begin{equation}
+  I^n = i_k + u^n ,
+\end{equation}
+dove $i_k$ è la corrente di pacco misurata all'istante $k$. Sull'orizzonte di
+predizione i due addendi sono entrambi costanti: $i_k$ perché della corrente
+di pacco non si ha un'anteprima, $u^n$ perché così è formulato il problema.
+Lungo l'orizzonte $I^n$ è quindi una costante: non un segnale che varia nel
+tempo, ma un \emph{parametro} da cui dipende tutta la traiettoria della cella.
+Su questa osservazione si regge il calcolo delle derivate della
+sezione~\ref{sec:derivate}.
+
+Il modello è presentato prima a tempo continuo, come equazioni differenziali, e
+poi nella forma discretizzata che l'MPC usa davvero.
+
+\subsection{A tempo continuo}\label{sec:continuo}
+
+La cella è descritta da un circuito equivalente: un generatore $V_{oc}$ in
+serie a una resistenza $R_o$ e a un ramo formato da $R_p$ e $C_p$ in parallelo.
+Detto $t$ il tempo trascorso dall'istante attuale, lo stato evolve secondo due
+equazioni differenziali, a cui si aggiunge un'equazione algebrica per l'uscita,
+la tensione ai morsetti $y$:
+\begin{align}
+  \dot s(t) &= -\frac{\eta}{3600\,C^n}\, I^n ,
+     \tag{C1}\label{eq:c-soc}\\
+  \dot V_p(t) &= -\frac{V_p(t)}{\tau\bigl(s(t)\bigr)}
+                 + \frac{I^n}{C_p\bigl(s(t)\bigr)} ,
+     \tag{C2}\label{eq:c-vp}\\
+  y(t) &= V_{oc}\bigl(s(t)\bigr) - V_p(t) - R_o\bigl(s(t)\bigr)\, I^n ,
+     \tag{C3}\label{eq:c-y}
+\end{align}
+con $\tau(s) = R_p(s)\,C_p(s)$ e condizioni iniziali $s(0) = s_k$,
+$V_p(0) = V_{p,k}$, lo stato misurato.
+\begin{itemize}
+  \item La \eqref{eq:c-soc} è il conteggio della carica: la corrente, positiva
+        in scarica, svuota la cella. $C^n$ è la capacità della cella in Ah,
+        cioè la carica che può erogare (il 3600 la porta in ampere-secondo),
+        ed $\eta$ è il rendimento di carica. $C^n$ non va confusa con $C_p$,
+        il condensatore del ramo RC, che si misura in farad. Una cella piena
+        non si carica oltre: se $s = 1$ e $I^n < 0$, allora $\dot s = 0$.
+  \item La \eqref{eq:c-vp} è il bilancio di corrente del ramo RC,
+        $C_p \dot V_p = I^n - V_p / R_p$, diviso per $C_p$. A corrente
+        costante $V_p$ tende a $R_p I^n$ con costante di tempo $\tau$.
+  \item La \eqref{eq:c-y} è la tensione ai morsetti: quella a vuoto meno le
+        cadute sul ramo RC e sulla resistenza serie.
+\end{itemize}
+In forma compatta, raccogliendo lo stato in $x = (s, V_p)$:
+\begin{equation}
+  \dot x(t) = f\bigl(x(t),\, I^n\bigr), \qquad
+  y(t) = g\bigl(x(t),\, I^n\bigr), \qquad x(0) = x_k ,
+  \tag{C4}\label{eq:c-compatta}
+\end{equation}
+dove $f$ ha per componenti i secondi membri della \eqref{eq:c-soc} e della
+\eqref{eq:c-vp}, e $g$ è il secondo membro della \eqref{eq:c-y}. Il modello non
+è lineare perché $\tau$, $C_p$, $V_{oc}$ e $R_o$ dipendono dallo stato di
+carica, nel modo descritto qui sotto.
+
+\subsection{I parametri in funzione del SOC}\label{sec:tabelle}
+
+Per ciascuno dei quattro parametri $V_{oc}$, $R_o$, $R_p$, $C_p$ è data una
+tabella \emph{nominale}, uguale per tutte le celle, con il valore del
+parametro in 7 punti di SOC (nel progetto 0; 0,1; 0,25; 0,5; 0,75; 0,9; 1).
+Tra un punto e l'altro si interpola linearmente. Le celle vere però non sono
+identiche: ognuna ha, per ogni parametro, un \emph{fattore di deviazione} che
+moltiplica la tabella nominale. Per esempio la resistenza serie della cella
+$n$ è $R_o^n(s) = f^n_{R_o}\,R_o^{\nom}(s)$.
+
+In formule, sia $P$ uno dei quattro parametri, $\sigma_1 < \dots < \sigma_7$ i
+punti di SOC della tabella e $P^{\nom}_1, \dots, P^{\nom}_7$ i valori nominali
+corrispondenti. Se $s$ cade nel tratto $i$, cioè
+$\sigma_i \le s < \sigma_{i+1}$, valore e derivata del parametro sono
+\begin{equation}
+  P(s) = f_P\,\bigl[P^{\nom}_i + m_i\,(s - \sigma_i)\bigr],
+  \qquad
+  P'(s) = f_P\, m_i ,
+  \qquad
+  m_i = \frac{P^{\nom}_{i+1} - P^{\nom}_i}{\sigma_{i+1} - \sigma_i} ,
+  \tag{T}\label{eq:tabella}
+\end{equation}
+dove $m_i$ è la pendenza del tratto $i$ della tabella nominale. Ne seguono tre
+fatti, che serviranno nel calcolo delle derivate.
+\begin{itemize}
+  \item Ogni parametro è una funzione \emph{lineare a tratti} del SOC: su
+        ciascun tratto la sua derivata rispetto a $s$ è una costante.
+  \item La derivata non richiede alcun calcolo numerico approssimato: è un
+        numero che si legge dalla stessa tabella del valore, e che cambia solo
+        quando $s$ passa da un tratto all'altro.
+  \item Nei casi limite si procede così. Un punto della tabella, dove la
+        funzione fa uno spigolo, è assegnato al tratto alla sua destra, come
+        dice la condizione $\sigma_i \le s < \sigma_{i+1}$; l'ultimo punto
+        all'ultimo tratto. Fuori dalla tabella si usa il valore dell'estremo,
+        con derivata nulla.
+\end{itemize}
+Per esempio, per la resistenza $R_p$ di una cella nominale ($f_{R_p} = 1$) in
+$s = 0{,}6$: il punto cade nel tratto tra $0{,}5$ e $0{,}75$, ai cui estremi
+la tabella vale $0{,}0016~\Omega$ e $0{,}0023~\Omega$. Quindi
+\begin{align*}
+  m &= \frac{0{,}0023 - 0{,}0016}{0{,}75 - 0{,}5} = 0{,}0028~\Omega , \\[2pt]
+  R_p &= 0{,}0016 + 0{,}0028 \cdot (0{,}6 - 0{,}5) = 0{,}00188~\Omega ,
+  \qquad
+  R_p' = m = 0{,}0028~\Omega .
+\end{align*}
+La derivata è riferita all'intera escursione del SOC, da 0 a 1:
+$R_p' = 0{,}0028~\Omega$ significa che, se il SOC sale di $0{,}01$, $R_p$ sale
+di $0{,}000028~\Omega$.
+
+Nel seguito $V_{oc}$, $R_o$, $R_p$, $C_p$ e $\tau = R_p\,C_p$ indicano sempre i
+parametri della cella considerata, fattore compreso: ogni cella ha i suoi. Nel
+codice valore e derivata sono restituiti insieme da una sola funzione
+(\file{qp_tabella.m}; \texttt{leggi\_tabella} in
+\file{predizione_linearizzata_semplice.m}).
+
+\subsection{Discretizzazione temporale}\label{sec:discreto}
+
+Il controllo lavora a passi di durata $\Tc$ e gli servono solo i valori dello
+stato agli istanti $k+1, \dots, k+p$. Si passa quindi dalle equazioni
+differenziali a una regola che fa avanzare lo stato di un passo alla volta. Con
+il metodo di Eulero in avanti la derivata è sostituita dal rapporto
+incrementale su un passo,
+\[
+  \dot x \;\simeq\; \frac{x_{k+j} - x_{k+j-1}}{\Tc}
+  \qquad\Longrightarrow\qquad
+  x_{k+j} = x_{k+j-1} + \Tc\, f\bigl(x_{k+j-1},\, I^n\bigr) ,
+\]
+con il secondo membro valutato nello stato di \emph{inizio} passo: lo stato
+avanza come se la sua derivata restasse, per tutto il passo, quella che ha
+all'inizio. Applicando la regola alle \eqref{eq:c-soc}--\eqref{eq:c-vp}, per
+$j = 1,\dots,p$ si ottiene (eq.~2a--2c):
+\begin{align}
+  s_{k+j} &= \min\bigl(s_{k+j-1} - \kappa^n I^n,\; 1\bigr), \label{eq:soc}\\
+  V_{p,k+j} &= V_{p,k+j-1} + \Tc\left(-\frac{V_{p,k+j-1}}{\tau(s_{k+j-1})}
+              + \frac{I^n}{C_p(s_{k+j-1})}\right), \label{eq:vp}\\
+  y_{k+j} &= V_{oc}(s_{k+j}) - V_{p,k+j} - R_o(s_{k+j})\, I^n , \label{eq:y}
+\end{align}
+con
+\begin{equation}
+  \tau(s) = R_p(s)\,C_p(s), \qquad
+  \kappa^n = \frac{\eta\,\Tc}{3600\,C^n} .
+\end{equation}
+Tre osservazioni, una per equazione.
+\begin{itemize}
+  \item Nella \eqref{eq:soc}, $\kappa^n$ è la frazione di carica persa in un
+        passo per ogni ampere: è il coefficiente della \eqref{eq:c-soc}
+        moltiplicato per $\Tc$. Il minimo impedisce a una cella piena di
+        caricarsi oltre.
+  \item Nella \eqref{eq:vp} i parametri del ramo RC sono letti nel SOC di
+        \emph{inizio} passo, $s_{k+j-1}$, come vuole la regola di Eulero.
+  \item La \eqref{eq:y} non contiene derivate rispetto al tempo, quindi non
+        c'è nulla da discretizzare: è la \eqref{eq:c-y} calcolata nello stato
+        di \emph{fine} passo, perché $y_{k+j}$ è la tensione all'istante
+        $k+j$. I parametri $V_{oc}$ e $R_o$ sono quindi letti in $s_{k+j}$.
+\end{itemize}
+La distinzione tra inizio e fine passo tornerà nel calcolo delle derivate.
+
+\paragraph{Quanto è fedele il modello discreto.} Per il SOC la
+discretizzazione è esatta, perché il secondo membro della \eqref{eq:c-soc} è
+costante. Per $V_p$ è un'approssimazione. Raccogliendo $V_{p,k+j-1}$ nella
+\eqref{eq:vp},
+\[
+  V_{p,k+j} = \left(1 - \frac{\Tc}{\tau}\right) V_{p,k+j-1}
+              + \frac{\Tc}{C_p}\, I^n ,
+\]
+si vede che a ogni passo la tensione precedente è moltiplicata per
+$1 - \Tc/\tau$. Il modello continuo, a parametri costanti, la moltiplicherebbe
+invece per $e^{-\Tc/\tau}$: i due fattori sono vicini solo se $\Tc$ è piccolo
+rispetto a $\tau$. Inoltre il modello discreto è stabile solo se
+$\Tc < 2\tau$, e non oscilla solo se $\Tc < \tau$. Con i valori di
+\file{init_parametri.m} ($\Tc = 20$~s, $\tau$ tra circa 30 e 106~s nei punti
+delle tabelle nominali) le due condizioni sono rispettate, ma dove $\tau$ è
+minima $\Tc/\tau$ vale circa 0,67: lì il fattore discreto è 0,33 e quello
+continuo 0,51. Il valore di regime, $R_p I^n$, è lo stesso nei due modelli;
+cambia la rapidità del transitorio.
+
+In ogni caso il modello di predizione dell'MPC è quello discreto
+\eqref{eq:soc}--\eqref{eq:y}: è su questo che si calcolano costo, vincoli e
+derivate.
+
+\section{Punto di linearizzazione}\label{sec:punto}
+
+Linearizzare significa sostituire una curva con la sua retta tangente, e una
+tangente si traccia in un punto preciso. Qui il punto è fissato da tre dati,
+tutti noti all'istante $k$:
+\begin{itemize}
+  \item lo stato misurato $(s_k, V_{p,k})$ di ogni cella;
+  \item la corrente di pacco misurata $i_k$;
+  \item la mossa del passo precedente, $\bar u^n = u^n_{k-1}$.
+\end{itemize}
+Con la corrente $I^n = i_k + \bar u^n$ le \eqref{eq:soc}--\eqref{eq:y} danno,
+per ogni cella, la \emph{traiettoria di linearizzazione}
+\[
+  \bar Y_{j,n} = y^n_{k+j}(\bar u^n), \qquad
+  \bar S_{j,n} = s^n_{k+j}(\bar u^n), \qquad j=1,\dots,p,\; n=1,\dots,N .
+\]
+È la predizione che si avrebbe se le correnti di bilanciamento restassero
+quelle del passo precedente. Ogni cella la percorre con i \emph{propri}
+parametri, cioè con i suoi fattori di deviazione e la sua capacità: la barra
+indica il punto di linearizzazione, non la cella nominale.
+
+La scelta di $u_{k-1}$ è naturale perché le correnti di bilanciamento variano
+lentamente: la soluzione del passo attuale è vicina a quella precedente, e lì
+l'approssimazione lineare è più accurata.
+
+Stato misurato, corrente di pacco e mossa precedente cambiano a ogni passo di
+controllo, e con loro cambia la traiettoria. Non si linearizza quindi una volta
+per tutte attorno a un punto di equilibrio: si linearizza attorno a una
+traiettoria, e lo si rifà a ogni passo. È lo schema che in letteratura va sotto
+il nome di linearizzazione successiva.
+
+\section{Sviluppo al primo ordine}\label{sec:sviluppo}
+
+Le celle non si influenzano tra loro nella predizione: tensione e SOC della
+cella $n$ dipendono solo dalla sua corrente $u^n$. Per ogni cella e per ogni
+passo $j$ basta quindi lo sviluppo al primo ordine di una funzione di una sola
+variabile, attorno a $\bar u^n$:
+\begin{equation}
+\begin{aligned}
+  y^n_{k+j}(u^n) &\;\simeq\; \bar Y_{j,n} + D_{j,n}\,\bigl(u^n - \bar u^n\bigr),
+  &\qquad
+  D_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n}\right|_{\bar u^n} , \\[6pt]
+  s^n_{k+j}(u^n) &\;\simeq\; \bar S_{j,n} + E_{j,n}\,\bigl(u^n - \bar u^n\bigr),
+  &\qquad
+  E_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n}\right|_{\bar u^n} .
+\end{aligned}
+\label{eq:lin}
+\end{equation}
+I termini noti $\bar Y$ e $\bar S$ sono la traiettoria di linearizzazione
+della sezione~\ref{sec:punto}. $D_{j,n}$ ed $E_{j,n}$ sono i \emph{coefficienti
+di sensibilità} della predizione: dicono di quanto cambiano, tra $j$ passi, la
+tensione e il SOC della cella $n$ per ogni ampere in più di corrente di
+bilanciamento. Per ogni $j$ e $n$ la prima riga della \eqref{eq:lin} è la
+retta tangente, nel punto $\bar u^n$, alla curva vera $y^n_{k+j}(u^n)$:
+coincide con essa in $\bar u^n$ e se ne allontana man mano che $u^n$ si scosta
+da $\bar u^n$.
+
+Poiché ogni cella dipende solo dalla propria corrente, bastano quattro matrici
+$p\times N$ (nel codice \texttt{Y}, \texttt{S}, \texttt{dY}, \texttt{dS})
+invece di una jacobiana $pN \times N$.
+
+Se il modello fosse lineare, $D$ ed $E$ sarebbero numeri fissi, calcolabili una
+volta per tutte, e la \eqref{eq:lin} sarebbe un'uguaglianza. Con il modello non
+lineare dipendono invece dal punto di linearizzazione: vanno ricalcolati a ogni
+passo di controllo, e la \eqref{eq:lin} è un'approssimazione, buona finché $u$
+resta vicina a $\bar u$.
+
+A questo punto $\bar Y$ e $\bar S$ si ottengono facendo avanzare il modello
+\eqref{eq:soc}--\eqref{eq:y} con la corrente $i_k + \bar u^n$. Restano da
+calcolare $D$ ed $E$: è l'argomento della prossima sezione.
+
+\section{Calcolo delle derivate}\label{sec:derivate}
+
+Questa sezione calcola i coefficienti di sensibilità $D_{j,n}$ ed $E_{j,n}$
+della \eqref{eq:lin}. Conviene ricordare che cosa sono: le derivate parziali
+della tensione e del SOC predetti, all'istante $k+j$, rispetto alla corrente
+di bilanciamento della stessa cella, valutate nel punto di linearizzazione.
+Tre premesse valgono per tutta la sezione.
+\begin{itemize}
+  \item \emph{Si deriva rispetto a $I$.} Poiché $I^n = i_k + u^n$ e $i_k$ è
+        fissata, un ampere in più di $u^n$ è un ampere in più di $I^n$:
+        derivare rispetto a $u^n$ equivale a derivare rispetto a $I^n$. Il
+        punto di linearizzazione $u^n = \bar u^n$ corrisponde alla corrente
+        $I^n = i_k + \bar u^n$. Le formule che seguono valgono per qualunque
+        valore della corrente; l'MPC le calcola con questo.
+  \item \emph{Si considera una cella sola.} Le celle sono indipendenti, quindi
+        l'indice $n$ è sottinteso: ogni formula va applicata a ciascuna cella,
+        con i suoi parametri.
+  \item \emph{La corrente è un parametro.} Come visto nella
+        sezione~\ref{sec:modello}, sull'orizzonte $I$ è costante. Le derivate
+        della soluzione di un'equazione differenziale rispetto a una costante
+        da cui essa dipende si chiamano \emph{derivate parametriche}, o
+        sensibilità.
+\end{itemize}
+La difficoltà è che la tensione ai morsetti dipende dalla corrente in due modi:
+direttamente, attraverso la caduta $R_o I$, e attraverso lo stato $(s, V_p)$,
+che la corrente ha spostato lungo l'orizzonte. Per derivarla bisogna quindi
+sapere prima di quanto la corrente sposta lo stato. Il calcolo procede in tre
+tempi:
+\begin{itemize}
+  \item la sezione~\ref{sec:sens} introduce le derivate parametriche dello
+        stato, $\alpha$ e $\beta$, e ricava a tempo continuo le equazioni a cui
+        obbediscono;
+  \item la sezione~\ref{sec:uso} mostra, sempre a tempo continuo, come da
+        $\alpha$ e $\beta$ si arriva alla retta della \eqref{eq:lin} e quindi
+        al QP;
+  \item la sezione~\ref{sec:derdiscreto} discretizza il tutto e arriva alle
+        formule che il codice applica.
+\end{itemize}
+
+\subsection{A tempo continuo: equazioni di sensibilità}\label{sec:sens}
+
+\subsubsection{Le derivate parametriche dello stato}
+
+Con la corrente $I$ costante, la soluzione della \eqref{eq:c-compatta} è una
+funzione del tempo e del valore scelto per la corrente: $x(t;\, I)$. Le
+derivate parametriche dello stato sono
+\[
+  \alpha(t) = \frac{\partial s(t;\, I)}{\partial I}, \qquad
+  \beta(t)  = \frac{\partial V_p(t;\, I)}{\partial I} .
+\]
+Dicono di quanto si sposta lo stato all'istante $t$ se la corrente, costante su
+tutto l'orizzonte, aumenta di un ampere. Nel seguito sono usate così:
+\begin{itemize}
+  \item $\alpha$ è già uno dei due coefficienti cercati: negli istanti di
+        campionamento è la derivata del SOC, cioè $E$ (\texttt{dS} nel codice);
+  \item $\alpha$ e $\beta$ insieme danno la derivata della tensione, cioè $D$
+        (\texttt{dY} nel codice): con la \eqref{eq:c-dy} a tempo continuo e
+        con la \eqref{eq:D} a tempo discreto;
+  \item $\alpha$ serve anche a calcolare $\beta$, perché i parametri del ramo
+        RC dipendono dal SOC: compare nella \eqref{eq:c-beta} e nella
+        \eqref{eq:beta};
+  \item $D$ ed $E$ entrano infine nel costo e nei vincoli del QP
+        (sezione~\ref{sec:qp}).
+\end{itemize}
+$\beta$ non esce quindi dal calcolo della predizione: è un passaggio intermedio
+verso $D$. Nel codice $\alpha$ e $\beta$ sono \texttt{alfa} e \texttt{beta}.
+
+Va tenuto presente che $\alpha$ e $\beta$ non sono derivate rispetto al tempo.
+Sono a loro volta funzioni del tempo: partono da zero e cambiano lungo
+l'orizzonte, man mano che l'effetto della corrente si accumula. Come lo stato,
+obbediscono a una propria equazione differenziale, detta equazione di
+sensibilità. Ha la stessa forma per qualunque sistema, quindi conviene
+scriverla prima in generale.
+
+\subsubsection{Espressione generale}
+
+Sia dato un sistema qualsiasi, con stato $x \in \mathbb{R}^{n_x}$ e un vettore
+$\theta \in \mathbb{R}^{n_\theta}$ di parametri costanti nel tempo:
+\[
+  \dot x = f(x, \theta), \qquad y = g(x, \theta), \qquad x(0) = x_0(\theta) .
+\]
+La matrice $n_x \times n_\theta$ delle derivate parametriche dello stato,
+$\partial x(t;\theta)/\partial\theta$, è la soluzione dell'equazione
+differenziale
+\[
+  \frac{d}{dt}\,\frac{\partial x}{\partial \theta}
+    = \frac{\partial f}{\partial x}\,\frac{\partial x}{\partial \theta}
+      + \frac{\partial f}{\partial \theta} ,
+  \qquad
+  \frac{\partial x}{\partial \theta}(0) = \frac{\partial x_0}{\partial \theta} ,
+\]
+e da essa si ricava, senza altre integrazioni, la derivata parametrica
+dell'uscita:
+\[
+  \frac{\partial y}{\partial \theta}
+    = \frac{\partial g}{\partial x}\,\frac{\partial x}{\partial \theta}
+      + \frac{\partial g}{\partial \theta} .
+\]
+Le due formule si ottengono derivando rispetto a $\theta$ le equazioni del
+sistema e, nella prima, scambiando l'ordine delle derivate rispetto a $t$ e a
+$\theta$. In entrambe il parametro entra in due modi: attraverso lo stato, che
+esso stesso ha spostato (primo addendo), e direttamente (secondo addendo). Tre
+proprietà dell'equazione di sensibilità servono nel seguito.
+\begin{itemize}
+  \item È lineare nell'incognita $\partial x/\partial\theta$, anche quando il
+        sistema non lo è.
+  \item I suoi coefficienti sono le jacobiane di $f$, valutate lungo la
+        traiettoria $x(t;\theta)$: cambiano nel tempo, e per conoscerle serve
+        lo stato.
+  \item La dipendenza va in una sola direzione: le derivate hanno bisogno dello
+        stato, lo stato non ha bisogno delle derivate. Lo stato si può quindi
+        calcolare da solo; le derivate si calcolano insieme allo stato, oppure
+        dopo.
+\end{itemize}
+Un esempio eseguibile di queste formule, su un sistema massa-molla-smorzatore
+integrato con \texttt{ode45}, è in \file{esempio_sensibilita_ode45.m}.
+
+\subsubsection{Applicazione alla cella}
+
+Per la cella il parametro è uno solo, $\theta = I$; lo stato è $x = (s, V_p)$,
+quindi $\partial x/\partial I = (\alpha, \beta)$; la condizione iniziale $x_k$
+è misurata, quindi non dipende da $I$. L'espressione generale diventa
+\begin{equation}
+  \frac{d}{dt}\,\frac{\partial x}{\partial I}
+    = \underbrace{\frac{\partial f}{\partial x}\,
+                  \frac{\partial x}{\partial I}}_{I \text{ tramite lo stato}}
+    \;+\; \underbrace{\frac{\partial f}{\partial I}}_{I \text{ diretta}} ,
+  \qquad \frac{\partial x}{\partial I}(0) = 0 .
+  \tag{C5}\label{eq:c-sens}
+\end{equation}
+La condizione iniziale è nulla perché lo stato misurato non dipende dalla
+corrente futura. Scritta per esteso, la \eqref{eq:c-sens} è
+\[
+  \frac{d}{dt}
+  \begin{bmatrix} \alpha \\[4pt] \beta \end{bmatrix}
+  =
+  \begin{bmatrix}
+    \dfrac{\partial f_1}{\partial s} & \dfrac{\partial f_1}{\partial V_p} \\[10pt]
+    \dfrac{\partial f_2}{\partial s} & \dfrac{\partial f_2}{\partial V_p}
+  \end{bmatrix}
+  \begin{bmatrix} \alpha \\[4pt] \beta \end{bmatrix}
+  +
+  \begin{bmatrix}
+    \dfrac{\partial f_1}{\partial I} \\[10pt] \dfrac{\partial f_2}{\partial I}
+  \end{bmatrix},
+\]
+dove $f_1$ e $f_2$ sono i secondi membri della \eqref{eq:c-soc} e della
+\eqref{eq:c-vp}:
+\[
+  f_1 = -\frac{\eta}{3600\,C}\, I , \qquad
+  f_2 = -\frac{V_p}{\tau(s)} + \frac{I}{C_p(s)} .
+\]
+Ogni riga è l'equazione di una delle due derivate: la prima di $\alpha$, la
+seconda di $\beta$. Restano da calcolare le sei derivate parziali.
+\begin{itemize}
+  \item $f_1$ contiene solo la corrente, quindi
+        $\partial f_1/\partial s = \partial f_1/\partial V_p = 0$ e
+        $\partial f_1/\partial I = -\eta/(3600\,C)$: la velocità con cui la
+        cella si scarica dipende dalla corrente, non dallo stato.
+  \item In $f_2$ la tensione $V_p$ compare solo al numeratore del primo
+        termine e la corrente solo al numeratore del secondo, quindi
+        $\partial f_2/\partial V_p = -1/\tau$ e
+        $\partial f_2/\partial I = 1/C_p$.
+  \item Il SOC compare in $f_2$ solo dentro $\tau$ e $C_p$, che stanno al
+        denominatore. Poiché la derivata di $1/\tau(s)$ rispetto a $s$ è
+        $-\tau'/\tau^2$, e lo stesso vale per $1/C_p(s)$,
+        \[
+          \frac{\partial f_2}{\partial s}
+            = \frac{V_p\,\tau'}{\tau^2} - \frac{I\,C_p'}{C_p^2} .
+        \]
+\end{itemize}
+In forma di matrici:
+\[
+  \frac{\partial f}{\partial x} =
+  \begin{bmatrix}
+    0 & 0 \\[4pt]
+    \dfrac{V_p\,\tau'}{\tau^2} - \dfrac{I\,C_p'}{C_p^2} & -\dfrac{1}{\tau}
+  \end{bmatrix},
+  \qquad
+  \frac{\partial f}{\partial I} =
+  \begin{bmatrix}
+    -\dfrac{\eta}{3600\,C} \\[8pt] \dfrac{1}{C_p}
+  \end{bmatrix}.
+\]
+In queste formule, e in quelle che seguono, l'argomento è sottinteso per non
+appesantire la scrittura: $\tau$, $C_p$, $\tau'$ e $C_p'$ stanno per
+$\tau(s(t))$, $C_p(s(t))$ e le loro derivate rispetto a $s$, e $V_p$ sta per
+$V_p(t)$. Sono grandezze che cambiano nel tempo, perché lo stato si muove lungo
+la traiettoria; la corrente $I$ invece è costante. A ogni istante sono comunque
+numeri noti: lo stato viene dalle \eqref{eq:c-soc}--\eqref{eq:c-vp}, i
+parametri e le loro derivate dalle tabelle con la \eqref{eq:tabella}, e
+$\tau' = R_p'\,C_p + R_p\,C_p'$ dalla regola di derivazione del prodotto
+$\tau = R_p\,C_p$.
+
+Sostituendo, la prima riga della \eqref{eq:c-sens} dà la \eqref{eq:c-alpha} e
+la seconda la \eqref{eq:c-beta}:
+\begin{align}
+  \dot\alpha(t) &= -\frac{\eta}{3600\,C} ,
+     \tag{C6}\label{eq:c-alpha}\\
+  \dot\beta(t) &=
+      \underbrace{-\frac{\beta}{\tau}}_{V_p \text{ dipende da } I}
+      \;+\; \underbrace{\frac{V_p\,\tau'\,\alpha}{\tau^2}}_{\tau \text{ tramite il SOC}}
+      \;+\; \underbrace{\frac{1}{C_p}}_{I \text{ diretta}}
+      \;-\; \underbrace{\frac{I\,C_p'\,\alpha}{C_p^2}}_{C_p \text{ tramite il SOC}} ,
+     \tag{C7}\label{eq:c-beta}
+\end{align}
+con $\alpha(0) = \beta(0) = 0$. Per l'uscita non serve un'altra equazione
+differenziale: basta la seconda formula generale. Con
+$g = V_{oc}(s) - V_p - R_o(s)\,I$ le derivate parziali sono
+$\partial g/\partial s = V_{oc}' - R_o'\,I$,
+$\partial g/\partial V_p = -1$ e $\partial g/\partial I = -R_o$, quindi
+\begin{equation}
+  \frac{\partial y(t)}{\partial I}
+    = V_{oc}'\,\alpha \;-\; \beta \;-\; R_o'\,\alpha\,I \;-\; R_o .
+  \tag{C8}\label{eq:c-dy}
+\end{equation}
+Tre osservazioni.
+\begin{itemize}
+  \item La \eqref{eq:c-alpha} si integra subito: $\alpha(t) = -\eta\,t/(3600\,C)$.
+        Il SOC è esattamente lineare nella corrente. Fa eccezione la cella
+        satura: finché resta a $s = 1$ lo fa per qualunque corrente vicina,
+        quindi $\alpha = 0$.
+  \item La \eqref{eq:c-beta} è lineare in $\beta$, ma i suoi coefficienti
+        contengono $s(t)$, $V_p(t)$ e $\alpha(t)$: non si può risolvere da
+        sola, va integrata dopo lo stato o insieme a esso, lungo la stessa
+        traiettoria. Lo stato invece non contiene né $\alpha$ né $\beta$: è la
+        dipendenza in una sola direzione già vista in generale.
+  \item Se i parametri non dipendessero dal SOC ($\tau' = C_p' = 0$)
+        resterebbe $\dot\beta = -\beta/\tau + 1/C_p$, la risposta di un
+        circuito RC lineare. I due termini con $\alpha$ sono il contributo
+        della non linearità.
+\end{itemize}
+
+\subsection{A tempo continuo: uso di $\alpha$ e $\beta$}\label{sec:uso}
+
+Le \eqref{eq:c-alpha}--\eqref{eq:c-dy} si calcolano lungo una traiettoria
+precisa: la traiettoria di linearizzazione della sezione~\ref{sec:punto}, cioè
+quella che la cella percorre partendo dallo stato misurato, con la corrente
+$I = i_k + \bar u$ tenuta costante sull'orizzonte. A tempo continuo la si
+indica con $\bar s(t)$, $\bar V_p(t)$, $\bar y(t)$. Lungo questa traiettoria
+$\alpha(t)$ e $\beta(t)$ sono funzioni note del tempo: si calcolano una volta
+sola, prima di ottimizzare.
+
+L'MPC deve però confrontare correnti diverse: $i_k + u$, con $u$ ancora da
+scegliere. Ognuna differisce dalla corrente di linearizzazione di
+$u - \bar u$. È qui che servono $\alpha$ e $\beta$.
+
+\paragraph{Primo uso: lo stato.} $\alpha$ e $\beta$ dicono dove si troverebbe
+lo stato con una di queste correnti, senza risolvere di nuovo le equazioni
+differenziali:
+\begin{align}
+  s(t;\, u) &\simeq \bar s(t) + \alpha(t)\,\bigl(u - \bar u\bigr) ,
+     \tag{C9}\label{eq:c-s-lin}\\
+  V_p(t;\, u) &\simeq \bar V_p(t) + \beta(t)\,\bigl(u - \bar u\bigr) .
+     \tag{C10}\label{eq:c-vp-lin}
+\end{align}
+Sono sviluppi al primo ordine: lo spostamento dello stato è la derivata
+moltiplicata per la variazione di corrente. Per il SOC la \eqref{eq:c-s-lin} è
+esatta finché la cella non satura; per $V_p$ la \eqref{eq:c-vp-lin} è
+un'approssimazione, buona se $u$ è vicina a $\bar u$.
+
+\paragraph{Secondo uso: l'uscita.} È quello che interessa all'MPC. Sia $d(t)$
+la derivata dell'uscita \eqref{eq:c-dy}, calcolata lungo la traiettoria di
+linearizzazione. Allora
+\begin{equation}
+  y(t;\, u) \;\simeq\; \bar y(t) + d(t)\,\bigl(u - \bar u\bigr) ,
+  \qquad
+  d(t) = V_{oc}'\,\alpha(t) - \beta(t) - R_o'\,\alpha(t)\,I - R_o .
+  \tag{C11}\label{eq:c-y-lin}
+\end{equation}
+È la versione a tempo continuo della prima riga della \eqref{eq:lin}; la
+\eqref{eq:c-s-lin} lo è della seconda. Per ogni istante $t$ la
+\eqref{eq:c-y-lin} è una retta in $u$: la tangente, nel punto $\bar u$, alla
+curva vera $y(t;\, u)$. I due coefficienti $\bar y(t)$ e $d(t)$ non dipendono
+da $u$; l'incognita compare solo nel fattore $(u - \bar u)$. In $d(t)$ ogni
+termine ha un ruolo:
+\begin{itemize}
+  \item $V_{oc}'\,\alpha$ e $R_o'\,\alpha\,I$ dicono di quanto cambiano la
+        tensione a vuoto e la caduta sulla resistenza serie perché la corrente
+        ha cambiato il SOC;
+  \item $\beta$ dice di quanto è cambiata la caduta sul ramo RC;
+  \item $R_o$ è l'effetto immediato della corrente sulla resistenza serie. È
+        il solo presente all'istante iniziale: $d(0) = -R_o$, perché
+        $\alpha(0) = \beta(0) = 0$. Gli altri crescono lungo l'orizzonte.
+\end{itemize}
+
+\paragraph{Verso il QP.} L'MPC sostituisce la predizione vera con queste
+rette. Per vedere che cosa ne guadagna basta scrivere, a tempo continuo, un
+vincolo di tensione minima e un costo di inseguimento di un riferimento
+$r(t)$:
+\begin{gather*}
+  \bar y^n(t) + d^n(t)\,\bigl(u^n - \bar u^n\bigr) \;\ge\; y_{\min}
+  \qquad \text{per ogni } t \in [0,\; p\,\Tc] , \\[4pt]
+  \int_0^{p\,\Tc} \sum_{n=1}^{N}
+     \Bigl(\bar y^n(t) + d^n(t)\,\bigl(u^n - \bar u^n\bigr) - r(t)\Bigr)^2 dt .
+\end{gather*}
+Il vincolo è lineare in $u$ e il costo quadratico: è già la struttura di un
+QP. In questa forma però i vincoli sono infiniti, uno per ogni istante, e il
+costo è un integrale. Il problema dell'MPC (eq.~6) è invece formulato solo agli
+istanti di campionamento $k+1, \dots, k+p$: bastano i valori di $\bar y$, $d$
+e $\alpha$ in quegli istanti. Li fornisce la discretizzazione.
+
+\subsection{Discretizzazione temporale}\label{sec:derdiscreto}
+
+La sezione precedente si è chiusa con una richiesta precisa: servono
+$\bar y$, $d$ e $\alpha$ solo negli istanti di campionamento. Qui li si
+calcola, arrivando alle formule che il codice applica: le \eqref{eq:beta},
+\eqref{eq:alpha} e \eqref{eq:D}.
+
+\subsubsection{Istanti di campionamento e grandezze discrete}
+
+L'orizzonte $[0,\; p\,\Tc]$ è diviso in $p$ passi di durata $\Tc$. Gli istanti
+di campionamento sono $t_j = j\,\Tc$, con $j = 0, \dots, p$: $t_0$ è l'istante
+attuale $k$ e $t_j$ l'istante $k+j$. Il passo $j$ è l'intervallo tra
+$t_{j-1}$ e $t_j$: comincia all'istante $k+j-1$ e finisce all'istante $k+j$.
+
+Le derivate parametriche dello stato negli istanti di campionamento sono
+\[
+  \alpha_j = \frac{\partial s_{k+j}}{\partial I}, \qquad
+  \beta_j  = \frac{\partial V_{p,k+j}}{\partial I}, \qquad
+  \alpha_0 = \beta_0 = 0 ,
+\]
+con condizioni iniziali nulle perché lo stato misurato $(s_k, V_{p,k})$ non
+dipende dalla corrente futura. A ogni grandezza a tempo continuo corrisponde
+così una grandezza discreta, con lo stesso significato:
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+ & Tempo continuo, in $t_j$ & Tempo discreto & Nel codice \\
+\midrule
+Stato & $\bar s(t_j)$, $\bar V_p(t_j)$ & $s_{k+j}$, $V_{p,k+j}$ & \texttt{s}, \texttt{Vp} \\
+Uscita & $\bar y(t_j)$ & $y_{k+j}$ & \texttt{y} \\
+Derivate parametriche dello stato & $\alpha(t_j)$, $\beta(t_j)$ & $\alpha_j$, $\beta_j$ & \texttt{alfa}, \texttt{beta} \\
+Coefficienti di sensibilità & $d(t_j)$, $\alpha(t_j)$ & $D_j$, $E_j$ & \texttt{D}, \texttt{E} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Le grandezze discrete non sono i valori esatti di quelle continue negli istanti
+$t_j$, ma la loro approssimazione con il metodo di Eulero; solo per il SOC e
+per $\alpha$ le due coincidono. Raccolte per tutti i passi e per tutte le
+celle, $y_{k+j}$ e $s_{k+j}$ formano le matrici $\bar Y$ e $\bar S$ della
+sezione~\ref{sec:punto} (nel codice \texttt{Y} e \texttt{S}), $D_j$ ed $E_j$
+le matrici $D$ ed $E$ della \eqref{eq:lin} (\texttt{dY} e \texttt{dS}).
+
+\subsubsection{Due strade equivalenti}
+
+Per passare dalle equazioni di sensibilità a formule discrete ci sono due
+strade:
+\begin{enumerate}
+  \item discretizzare con Eulero in avanti le equazioni di sensibilità
+        \eqref{eq:c-alpha}--\eqref{eq:c-beta}, con lo stesso passo $\Tc$ usato
+        per lo stato;
+  \item derivare rispetto a $I$ le equazioni dello stato già discretizzate,
+        \eqref{eq:soc}--\eqref{eq:y}.
+\end{enumerate}
+La regola di Eulero è quella della sezione~\ref{sec:discreto}: una grandezza
+$z(t)$ avanza di un passo come se la sua derivata, calcolata all'\emph{inizio}
+del passo, restasse costante per tutta la durata del passo,
+\[
+  z_j = z_{j-1} + \Tc\; \dot z\,\big|_{t_{j-1}} .
+\]
+Con Eulero in avanti le due strade portano alle stesse formule. Derivando un
+passo del modello discreto si ottiene infatti
+\[
+  x_{k+j} = x_{k+j-1} + \Tc\, f(x_{k+j-1}, I)
+  \quad\Longrightarrow\quad
+  \frac{\partial x_{k+j}}{\partial I}
+    = \frac{\partial x_{k+j-1}}{\partial I}
+      + \Tc\left(\frac{\partial f}{\partial x}\,
+                 \frac{\partial x_{k+j-1}}{\partial I}
+                 + \frac{\partial f}{\partial I}\right),
+\]
+che è proprio un passo di Eulero sulla \eqref{eq:c-sens}.
+
+Il codice segue la seconda strada: a ogni passo, accanto a ogni equazione del
+modello c'è la sua derivata, e le derivate avanzano insieme allo stato. La
+conseguenza è importante: le derivate che si ottengono sono quelle
+\emph{esatte} del modello discreto, cioè proprio del modello su cui l'MPC
+costruisce costo e vincoli. Non c'è un secondo errore di approssimazione che
+si aggiunge a quello del modello.
+
+Di seguito le tre equazioni del modello discreto sono derivate una alla volta,
+nell'ordine in cui il codice le applica: prima la tensione di polarizzazione,
+poi lo stato di carica, infine la tensione ai morsetti. Per ciascuna si segue
+la seconda strada e si verifica che la prima dà lo stesso risultato.
+
+\subsubsection{Tensione di polarizzazione}
+
+Si cerca $\beta_j$, la derivata rispetto a $I$ della tensione di polarizzazione
+a fine passo, $V_{p,k+j}$. Il punto di partenza è l'equazione che la calcola,
+la \eqref{eq:vp}:
+\[
+  V_{p,k+j} = V_{p,k+j-1} + \Tc\left(-\frac{V_{p,k+j-1}}{\tau(s_{k+j-1})}
+              + \frac{I}{C_p(s_{k+j-1})}\right) .
+\]
+A secondo membro tutto è riferito all'\emph{inizio} del passo: la tensione
+$V_{p,k+j-1}$ e i parametri del ramo RC, letti nel SOC $s_{k+j-1}$.
+
+\paragraph{Notazione.} Poiché in tutto questo paragrafo i parametri sono
+valutati nello stesso punto, $s_{k+j-1}$, l'argomento viene sottinteso:
+\[
+  \tau = \tau(s_{k+j-1}), \qquad C_p = C_p(s_{k+j-1}), \qquad
+  \tau' = \frac{d\tau}{ds}(s_{k+j-1}), \qquad
+  C_p' = \frac{dC_p}{ds}(s_{k+j-1}) .
+\]
+Con questa scrittura la \eqref{eq:vp} diventa
+$V_{p,k+j} = V_{p,k+j-1} + \Tc\,\bigl(-V_{p,k+j-1}/\tau + I/C_p\bigr)$.
+
+\paragraph{Che cosa dipende dalla corrente.} Prima di derivare bisogna
+stabilire quali grandezze, a secondo membro, cambiano se cambia $I$. Sono tre.
+\begin{itemize}
+  \item La corrente $I$ stessa, che compare in modo esplicito al numeratore
+        dell'ultimo termine.
+  \item La tensione di inizio passo, $V_{p,k+j-1}$: è il risultato dei passi
+        precedenti, durante i quali la corrente ha già agito. La sua derivata
+        è, per definizione, $\beta_{j-1}$.
+  \item I parametri $\tau$ e $C_p$: non contengono $I$ in modo esplicito, ma
+        sono letti nel SOC $s_{k+j-1}$, che la corrente ha spostato nei passi
+        precedenti. La derivata di $s_{k+j-1}$ è, per definizione,
+        $\alpha_{j-1}$; per la regola di derivazione delle funzioni composte
+        \[
+          \frac{\partial \tau}{\partial I}
+             = \frac{d\tau}{ds}\,\frac{\partial s_{k+j-1}}{\partial I}
+             = \tau'\,\alpha_{j-1} ,
+          \qquad
+          \frac{\partial C_p}{\partial I}
+             = \frac{dC_p}{ds}\,\frac{\partial s_{k+j-1}}{\partial I}
+             = C_p'\,\alpha_{j-1} .
+        \]
+\end{itemize}
+Il passo $\Tc$ invece è una costante. Il terzo punto è quello in cui la non
+linearità del modello entra nel calcolo: se i parametri non dipendessero dal
+SOC, $\tau'$ e $C_p'$ sarebbero nulli e la corrente agirebbe solo nei primi due
+modi.
+
+\paragraph{Derivata termine per termine.} I tre addendi della \eqref{eq:vp} si
+derivano uno alla volta. Il secondo e il terzo sono quozienti, e sia il
+numeratore sia il denominatore possono dipendere da $I$:
+\begin{align*}
+  \frac{\partial}{\partial I}\, V_{p,k+j-1} &= \beta_{j-1} , \\[4pt]
+  \frac{\partial}{\partial I} \left(-\frac{V_{p,k+j-1}}{\tau}\right)
+     &= -\frac{1}{\tau}\,\frac{\partial V_{p,k+j-1}}{\partial I}
+        + \frac{V_{p,k+j-1}}{\tau^2}\,\frac{\partial \tau}{\partial I}
+      = -\frac{\beta_{j-1}}{\tau}
+        + \frac{V_{p,k+j-1}\,\tau'\,\alpha_{j-1}}{\tau^2} , \\[4pt]
+  \frac{\partial}{\partial I} \left(\frac{I}{C_p}\right)
+     &= \frac{1}{C_p} - \frac{I}{C_p^2}\,\frac{\partial C_p}{\partial I}
+      = \frac{1}{C_p} - \frac{I\,C_p'\,\alpha_{j-1}}{C_p^2} .
+\end{align*}
+Nella seconda e nella terza riga il primo addendo viene dal numeratore, il
+secondo dal denominatore.
+
+\paragraph{Risultato.} Sommando le tre righe, con il fattore $\Tc$ davanti
+alle ultime due:
+\begin{equation}
+  \beta_j = \beta_{j-1} + \Tc\left(
+      \underbrace{-\frac{\beta_{j-1}}{\tau}}_{V_p \text{ dipende da } I}
+      \;+\; \underbrace{\frac{V_{p,k+j-1}\,\tau'\,\alpha_{j-1}}{\tau^2}}_{\tau \text{ tramite il SOC}}
+      \;+\; \underbrace{\frac{1}{C_p}}_{I \text{ diretta}}
+      \;-\; \underbrace{\frac{I\,C_p'\,\alpha_{j-1}}{C_p^2}}_{C_p \text{ tramite il SOC}}
+  \right) .
+  \label{eq:beta}
+\end{equation}
+I quattro termini tra parentesi sono i modi in cui la corrente agisce su
+$V_{p,k+j}$ durante il passo: attraverso la tensione di inizio passo,
+attraverso $\tau$, in modo diretto e attraverso $C_p$. Nel codice è
+l'istruzione
+{\small
+\begin{verbatim}
+    beta = beta + Tc*( -beta/tau + Vp*dtau*alfa/tau^2 + 1/Cp - I*dCp*alfa/Cp^2 );
+\end{verbatim}
+}
+\noindent
+Al primo passo, $j = 1$, le derivate di inizio passo sono $\alpha_0 = \beta_0
+= 0$: tre termini su quattro si annullano e resta
+$\beta_1 = \Tc / C_p(s_k)$. Dopo un solo passo la corrente ha agito sulla
+tensione di polarizzazione solo in modo diretto; gli altri tre termini
+compaiono dal secondo passo in poi.
+
+\paragraph{Verifica con la prima strada.} La stessa formula si ottiene
+discretizzando la \eqref{eq:c-beta} con Eulero: si sostituisce $\dot\beta$ con
+il rapporto incrementale e si valuta il secondo membro all'inizio del passo,
+cioè in $t_{j-1}$:
+\[
+  \frac{\beta_j - \beta_{j-1}}{\Tc}
+    = -\frac{\beta_{j-1}}{\tau}
+      + \frac{V_{p,k+j-1}\,\tau'\,\alpha_{j-1}}{\tau^2}
+      + \frac{1}{C_p}
+      - \frac{I\,C_p'\,\alpha_{j-1}}{C_p^2} .
+\]
+Moltiplicando per $\Tc$ e portando $\beta_{j-1}$ a secondo membro si ritrova
+la \eqref{eq:beta}, come previsto.
+
+\paragraph{Dai simboli ai numeri.} Quando il codice applica la
+\eqref{eq:beta} al passo $j$, ogni simbolo a secondo membro è un numero già
+disponibile:
+\begin{itemize}
+  \item $\Tc$ e $I$ sono fissati prima di cominciare: il passo di controllo e
+        la corrente del punto di linearizzazione;
+  \item $V_{p,k+j-1}$, $\alpha_{j-1}$ e $\beta_{j-1}$ sono stati calcolati al
+        passo precedente; al primo passo sono la tensione misurata $V_{p,k}$ e
+        due zeri;
+  \item $R_p$, $C_p$ e le loro derivate $R_p'$, $C_p'$ si leggono dalle
+        tabelle con la \eqref{eq:tabella}, nel SOC $s_{k+j-1}$;
+  \item da questi si calcolano $\tau$ e la sua derivata, con la regola di
+        derivazione di un prodotto:
+        $\tau = R_p\,C_p$ e $\tau' = R_p'\,C_p + R_p\,C_p'$.
+\end{itemize}
+In nessun punto serve una derivata calcolata per via numerica, per esempio con
+le differenze finite. L'esempio numerico più avanti ripercorre questi passaggi
+con i valori del progetto.
+
+\subsubsection{Stato di carica}
+
+Si cerca $\alpha_j$, la derivata rispetto a $I$ del SOC a fine passo,
+$s_{k+j}$. L'equazione di partenza è la \eqref{eq:soc},
+$s_{k+j} = \min\bigl(s_{k+j-1} - \kappa I,\; 1\bigr)$, in cui $\kappa$ è una
+costante della cella: non dipende né dalla corrente né dal SOC. Ci sono due
+casi.
+\begin{itemize}
+  \item \emph{La cella non satura}: $s_{k+j} = s_{k+j-1} - \kappa I$. La
+        corrente agisce attraverso il SOC di inizio passo, la cui derivata è
+        $\alpha_{j-1}$, e in modo diretto, con derivata $-\kappa$.
+  \item \emph{La cella satura}: il minimo sceglie la costante 1. Il SOC resta
+        a 1 anche per correnti un poco diverse, quindi non dipende più dalla
+        corrente e la sua derivata è nulla.
+\end{itemize}
+In tutto:
+\begin{equation}
+  \alpha_j =
+  \begin{cases}
+    \alpha_{j-1} - \kappa & \text{se } s_{k+j-1} - \kappa I < 1,\\[2pt]
+    0 & \text{se la cella satura a } s_{k+j} = 1 .
+  \end{cases}
+  \label{eq:alpha}
+\end{equation}
+La prima strada dà lo stesso risultato: Eulero sulla \eqref{eq:c-alpha} è
+$\alpha_j = \alpha_{j-1} + \Tc \cdot \bigl(-\eta/(3600\,C)\bigr)
+= \alpha_{j-1} - \kappa$. Finché la cella non satura, quindi,
+$\alpha_j = -j\,\kappa$, che coincide con la soluzione esatta della
+\eqref{eq:c-alpha} all'istante $t_j$: qui Eulero non introduce errore, perché
+il secondo membro della \eqref{eq:c-alpha} è costante. È la conferma, a tempo
+discreto, che il SOC è esattamente lineare nella corrente.
+
+\subsubsection{Tensione ai morsetti}
+
+Si cercano i due coefficienti di sensibilità del passo $j$. Quello del SOC è
+immediato: per definizione $E_j = \alpha_j$. Per quello della tensione, $D_j$,
+il punto di partenza è l'equazione dell'uscita, la \eqref{eq:y}:
+\[
+  y_{k+j} = V_{oc}(s_{k+j}) - V_{p,k+j} - R_o(s_{k+j})\, I .
+\]
+A differenza della \eqref{eq:vp}, qui tutto è riferito alla \emph{fine} del
+passo, perché $y_{k+j}$ è la tensione all'istante $k+j$: compaiono lo stato
+appena aggiornato e i parametri letti nel nuovo SOC. Di conseguenza anche le
+derivate che servono sono quelle di fine passo, $\alpha_j$ e $\beta_j$.
+Sottintendendo l'argomento come prima, $V_{oc}$, $R_o$, $V_{oc}'$ e $R_o'$ sono
+valutati in $s_{k+j}$.
+
+La corrente agisce in quattro modi:
+\begin{itemize}
+  \item attraverso $V_{oc}$, che dipende dal SOC:
+        $\partial V_{oc}/\partial I = V_{oc}'\,\alpha_j$;
+  \item attraverso $V_{p,k+j}$, la cui derivata è $\beta_j$;
+  \item attraverso $R_o$, che dipende dal SOC:
+        $\partial R_o/\partial I = R_o'\,\alpha_j$;
+  \item in modo diretto, perché $I$ moltiplica $R_o$.
+\end{itemize}
+Gli ultimi due vengono dalla derivata del prodotto $R_o\,I$, che è
+$R_o'\,\alpha_j\,I + R_o$. Sommando:
+\begin{equation}
+\begin{aligned}
+  D_j &= \frac{\partial y_{k+j}}{\partial I}
+      = \underbrace{V_{oc}'\,\alpha_j}_{V_{oc} \text{ tramite il SOC}}
+        \;-\; \underbrace{\beta_j}_{V_p \text{ dipende da } I}
+        \;-\; \underbrace{R_o'\,\alpha_j\,I}_{R_o \text{ tramite il SOC}}
+        \;-\; \underbrace{R_o}_{I \text{ diretta}} , \\[4pt]
+  E_j &= \alpha_j .
+\end{aligned}
+\label{eq:D}
+\end{equation}
+Nel codice è l'istruzione \texttt{D = dVoc*alfa - beta - dRo*alfa*I - Ro}.
+L'uscita
+non ha una dinamica propria, quindi qui non c'è nulla da discretizzare: la
+\eqref{eq:D} è la \eqref{eq:c-dy} calcolata nello stato di fine passo, ed è il
+valore discreto di $d(t_j)$. I numeri si ottengono come prima: $\alpha_j$ e
+$\beta_j$ sono appena stati aggiornati, mentre $V_{oc}$, $R_o$ e le loro
+derivate si leggono dalle tabelle con la \eqref{eq:tabella}, questa volta in
+$s_{k+j}$.
+
+\subsubsection{Ordine dei calcoli}
+
+Mettendo insieme le tre derivazioni, un passo $j$ dell'orizzonte si svolge
+così:
+\begin{enumerate}
+  \item si leggono dalle tabelle, con la \eqref{eq:tabella}, $R_p$, $C_p$ e le
+        loro derivate nel SOC di inizio passo, $s_{k+j-1}$, e da questi si
+        calcolano $\tau$ e $\tau'$;
+  \item si aggiorna $\beta$ con la \eqref{eq:beta}, che usa $V_{p,k+j-1}$,
+        $\alpha_{j-1}$ e $\beta_{j-1}$;
+  \item si aggiorna $V_p$ con la \eqref{eq:vp};
+  \item si aggiornano $s$ con la \eqref{eq:soc} e $\alpha$ con la
+        \eqref{eq:alpha};
+  \item si leggono allo stesso modo $V_{oc}$, $R_o$ e le loro derivate nel
+        nuovo SOC, $s_{k+j}$;
+  \item si calcolano $y_{k+j}$ con la \eqref{eq:y} e $D_j$, $E_j$ con la
+        \eqref{eq:D}, e si scrivono nella riga $j$ delle quattro matrici.
+\end{enumerate}
+L'ordine non è arbitrario. Nel codice ogni grandezza occupa una sola
+variabile, che a ogni passo viene sovrascritta: prima dell'aggiornamento
+contiene il valore di inizio passo, dopo quello di fine passo. La
+\eqref{eq:beta} vuole $V_p$ e $\alpha$ di \emph{inizio} passo, quindi $\beta$
+va aggiornata prima di loro; la \eqref{eq:D} vuole stato e derivate di
+\emph{fine} passo, quindi viene per ultima. Al primo passo si parte dallo
+stato misurato e da $\alpha_0 = \beta_0 = 0$; a ogni passo successivo dai
+valori lasciati dal precedente.
+
+\subsubsection{Esempio numerico}
+
+Si considera una cella nominale, cioè con tutti i fattori di deviazione uguali
+a 1, e i valori di \file{init_parametri.m}: $\Tc = 20$~s e
+$\kappa = 2{,}011 \cdot 10^{-4}~\mathrm{A}^{-1}$. Lo stato misurato è
+$s_k = 0{,}6$, $V_{p,k} = 0$; la corrente del punto di linearizzazione è
+$I = 10$~A.
+
+\paragraph{Primo passo.} Le tabelle si leggono in $s_k = 0{,}6$, nel tratto
+tra $0{,}5$ e $0{,}75$. Per $R_p$ il calcolo è quello della
+sezione~\ref{sec:tabelle}: $R_p = 0{,}00188~\Omega$ e
+$R_p' = 0{,}0028~\Omega$. Allo stesso modo, per $C_p$:
+\[
+  C_p' = \frac{33630 - 18721}{0{,}75 - 0{,}5} = 59636~\mathrm{F} ,
+  \qquad
+  C_p = 18721 + 59636 \cdot 0{,}1 = 24685~\mathrm{F} .
+\]
+Da questi quattro numeri:
+\[
+  \tau = R_p\,C_p = 46{,}4~\mathrm{s} ,
+  \qquad
+  \tau' = R_p'\,C_p + R_p\,C_p'
+        = 0{,}0028 \cdot 24685 + 0{,}00188 \cdot 59636
+        = 181{,}2~\mathrm{s} .
+\]
+Come per $R_p'$, la derivata è riferita all'intera escursione del SOC:
+$\tau' = 181{,}2$~s significa che, se il SOC scende di $0{,}01$, $\tau$ scende
+di circa $1{,}8$~s. Poiché $\alpha_0 = \beta_0 = 0$, della \eqref{eq:beta}
+resta solo il termine diretto, e lo stato avanza con le \eqref{eq:vp} e
+\eqref{eq:soc}:
+\begin{align*}
+  \beta_1 &= \frac{\Tc}{C_p} = 0{,}810~\mathrm{mV/A} ,
+  & V_{p,k+1} &= \frac{\Tc\,I}{C_p} = 8{,}10~\mathrm{mV} , \\[2pt]
+  \alpha_1 &= -\kappa = -0{,}201 \cdot 10^{-3}~\mathrm{A}^{-1} ,
+  & s_{k+1} &= 0{,}6 - \kappa\,I = 0{,}5980 .
+\end{align*}
+
+\paragraph{Lungo l'orizzonte.} La tabella riporta i quattro termini della
+\eqref{eq:beta} ai passi 1, 2 e 30, con i valori da cui sono calcolati. Su
+tutto l'orizzonte il SOC resta nel tratto tra $0{,}5$ e $0{,}75$, quindi
+$R_p' = 0{,}0028~\Omega$ e $C_p' = 59636$~F non cambiano.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+ & $j = 1$ & $j = 2$ & $j = 30$ \\
+\midrule
+\multicolumn{4}{l}{\emph{Valori di inizio passo}} \\
+$s_{k+j-1}$ & 0,6000 & 0,5980 & 0,5417 \\
+$V_{p,k+j-1}$ [mV] & 0 & 8,10 & 17,27 \\
+$\alpha_{j-1}$ [$10^{-3}~\mathrm{A}^{-1}$] & 0 & $-0{,}201$ & $-5{,}832$ \\
+$\beta_{j-1}$ [mV/A] & 0 & 0,810 & 1,572 \\
+\midrule
+\multicolumn{4}{l}{\emph{Parametri letti in $s_{k+j-1}$}} \\
+$C_p$ [F] & 24685 & 24565 & 21207 \\
+$\tau$ [s] & 46,4 & 46,0 & 36,4 \\
+$\tau'$ [s] & 181,2 & 180,6 & 161,8 \\
+\midrule
+\multicolumn{4}{l}{\emph{Termini della \eqref{eq:beta}} [$\mu$V/(A\,s)]} \\
+$-\beta_{j-1}/\tau$ \quad ($V_p$ dipende da $I$) & 0 & $-17{,}6$ & $-43{,}2$ \\
+$V_{p,k+j-1}\,\tau'\,\alpha_{j-1}/\tau^2$ \quad ($\tau$ tramite il SOC) & 0 & $-0{,}1$ & $-12{,}3$ \\
+$1/C_p$ \quad ($I$ diretta) & 40,5 & 40,7 & 47,2 \\
+$-I\,C_p'\,\alpha_{j-1}/C_p^2$ \quad ($C_p$ tramite il SOC) & 0 & $+0{,}2$ & $+7{,}7$ \\
+Somma & 40,5 & 23,2 & $-0{,}6$ \\
+\midrule
+$\beta_j = \beta_{j-1} + \Tc \cdot \text{somma}$ [mV/A] & 0,810 & 1,274 & 1,560 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Tre cose si leggono nella tabella.
+\begin{itemize}
+  \item Al primo passo c'è solo il termine diretto, come già visto.
+  \item Dal secondo passo compare il termine $-\beta_{j-1}/\tau$, di segno
+        opposto, che frena la crescita di $\beta$: al passo 30 la somma è
+        quasi nulla e $\beta$ si è assestata poco sotto il valore di $R_p$ a
+        quel SOC ($1{,}72$~mV/A).
+  \item I due termini che esistono solo perché i parametri dipendono dal SOC
+        sono trascurabili all'inizio: al passo 2 valgono meno dell'1\% del
+        termine diretto. Crescono però insieme ad $\alpha$, cioè con il numero
+        di passi: al passo 30 valgono il 26\% e il 16\% del termine diretto,
+        con segni opposti. La non linearità pesa sempre di più andando avanti
+        lungo l'orizzonte.
+\end{itemize}
+Per la tensione ai morsetti i parametri si leggono nel SOC di fine passo, dove
+$V_{oc}' = 0{,}8528$~V e $R_o' = 0{,}0004~\Omega$ su tutto il tratto. I quattro
+termini della \eqref{eq:D} e i due coefficienti di sensibilità valgono:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+ & $j = 1$ & $j = 2$ & $j = 30$ \\
+\midrule
+\multicolumn{4}{l}{\emph{Termini della \eqref{eq:D}} [mV/A]} \\
+$V_{oc}'\,\alpha_j$ \quad ($V_{oc}$ tramite il SOC) & $-0{,}172$ & $-0{,}343$ & $-5{,}145$ \\
+$-\beta_j$ \quad ($V_p$ dipende da $I$) & $-0{,}810$ & $-1{,}274$ & $-1{,}560$ \\
+$-R_o'\,\alpha_j\,I$ \quad ($R_o$ tramite il SOC) & $+0{,}001$ & $+0{,}002$ & $+0{,}024$ \\
+$-R_o$ \quad ($I$ diretta) & $-8{,}239$ & $-8{,}238$ & $-8{,}216$ \\
+\midrule
+$D_j$ [mV/A] & $-9{,}220$ & $-9{,}853$ & $-14{,}897$ \\
+$E_j = \alpha_j$ [$10^{-3}~\mathrm{A}^{-1}$] & $-0{,}201$ & $-0{,}402$ & $-6{,}033$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+In concreto: con 1~A in più di corrente la tensione predetta è più bassa di
+$9{,}2$~mV dopo un passo e di $14{,}9$~mV dopo 30. Dopo un passo il coefficiente
+è quasi solo la resistenza serie; lungo l'orizzonte cresce il contributo della
+tensione a vuoto, perché la corrente in più ha scaricato di più la cella.
+
+\subsubsection{Errore di discretizzazione}
+
+Le derivate così calcolate sono esatte per il modello discreto. Rispetto a
+quelle del modello continuo ereditano invece l'errore di Eulero, lo stesso
+discusso nella sezione~\ref{sec:discreto} per lo stato: $\alpha_j$ coincide con
+$\alpha(t_j)$, mentre $\beta_j$ e $D_j$ approssimano $\beta(t_j)$ e $d(t_j)$.
+Raccogliendo $\beta_{j-1}$ nella \eqref{eq:beta},
+\[
+  \beta_j = \left(1 - \frac{\Tc}{\tau}\right)\beta_{j-1}
+            + \Tc\left(\frac{V_{p,k+j-1}\,\tau'\,\alpha_{j-1}}{\tau^2}
+            + \frac{1}{C_p} - \frac{I\,C_p'\,\alpha_{j-1}}{C_p^2}\right) ,
+\]
+compare lo stesso fattore $1 - \Tc/\tau$ che nella \eqref{eq:vp} moltiplica
+$V_{p,k+j-1}$: la derivata ha la stessa dinamica dello stato, e quindi lo
+stesso tipo di errore. Va ribadito che questo errore riguarda il modello di
+predizione, non la linearizzazione: l'MPC ottimizza sul modello discreto, e le
+derivate sono coerenti con quello.
+
+\subsubsection{Dalle derivate al QP}
+
+Con $D_j$ ed $E_j$ calcolati per ogni passo e per ogni cella, lo sviluppo
+\eqref{eq:lin} è completo:
+\[
+  y_{k+j}(u) \simeq \bar Y_j + D_j\,\bigl(u - \bar u\bigr), \qquad
+  s_{k+j}(u) \simeq \bar S_j + E_j\,\bigl(u - \bar u\bigr), \qquad
+  j = 1, \dots, p .
+\]
+Sono la \eqref{eq:c-y-lin} e la \eqref{eq:c-s-lin} negli istanti di
+campionamento. Gli infiniti vincoli del tempo continuo diventano $p$ vincoli
+per cella e l'integrale del costo una somma su $j$: è il QP della prossima
+sezione. $\beta_j$ non vi compare: si esaurisce nel calcolo di $D_j$.
+
+\section{Dalla linearizzazione al QP}\label{sec:qp}
+
+La sezione~\ref{sec:derivate} fornisce, per ogni cella $n$ e per ogni passo
+$j$, i quattro numeri della \eqref{eq:lin}: $\bar Y_{j,n}$, $\bar S_{j,n}$,
+$D_{j,n}$ ed $E_{j,n}$. Qui si vede, in sintesi, come entrano nel QP; la
+costruzione completa, con le motivazioni di ogni passaggio, è nel documento
+\file{Problema_QP_MPC.pdf}. Conviene anzitutto
+isolare nella \eqref{eq:lin} la parte che non dipende da $u$:
+\begin{equation}
+  y^n_{k+j}(u^n) \simeq Y^0_{j,n} + D_{j,n}\,u^n,
+  \qquad Y^0_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n .
+\end{equation}
+Le incognite del QP sono raccolte in
+\[
+  z = \begin{bmatrix} u \\ \varepsilon \\ e \end{bmatrix},
+\]
+con $u \in \mathbb{R}^N$ le correnti di bilanciamento, $\varepsilon$ le
+variabili ausiliarie del costo (nessuna per $J_t$, $p$ per $J_m$, $2p$ per
+$J_\Delta$) ed $e \ge 0$ la variabile che rilassa il vincolo di tensione
+(eq.~17). Il problema è
+\[
+  \min_z \; \tfrac12\, z^\top H z + f^\top z
+  \qquad \text{con} \qquad A z \le b, \quad A_{eq}\, z = b_{eq} .
+\]
+Qui $f$ è il vettore del termine lineare del costo, secondo la notazione di
+\texttt{quadprog}: non è la funzione $f(x, I)$ della
+sezione~\ref{sec:modello}. In tutte le formulazioni il costo contiene
+$\rho\, u^\top u + W e^2$, con $\rho = r\,p/p_{\mathrm{rif}}$: contribuiscono a
+$H$ con $2\rho$ sulla diagonale delle $u$ e $2W$ su $e$.
+
+\subsection{Costo}
+
+\paragraph{$J_t$, inseguimento della cella nominale (eq.~7).} Detto $r_j$ il
+riferimento al passo $j$ (blocco \file{Cella_nominale}), il termine di
+inseguimento è
+\[
+  \sum_{j=1}^{p}\sum_{n=1}^{N} \bigl(Y^0_{j,n} + D_{j,n}\,u^n - r_j\bigr)^2 ,
+\]
+quadratico in $u$ grazie alla linearizzazione. Sviluppando il quadrato:
+\begin{equation}
+  H_{u^n u^n} = 2\sum_{j=1}^{p} D_{j,n}^2 + 2\rho, \qquad
+  f_{u^n} = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^0_{j,n} - r_j\bigr) .
+\end{equation}
+Il blocco delle $u$ in $H$ è diagonale: le celle sono accoppiate solo dal
+vincolo sulla somma delle correnti.
+
+\paragraph{$J_m$, massimizzazione della cella più bassa (eq.~9--10).} Il costo
+è $-\sum_j \varepsilon_j$, lineare; il minimo sulle celle è espresso dai
+vincoli $\varepsilon_j \le y^n_{k+j}$ per ogni $n$.
+
+\paragraph{$J_\Delta$, minima differenza tra le celle (eq.~12--13).} Il costo è
+$\sum_j \varepsilon_{p+j} - \sum_j \varepsilon_j$, con in più i vincoli
+$\varepsilon_{p+j} \ge y^n_{k+j}$.
+
+\subsection{Vincoli}
+
+Sostituendo la predizione linearizzata, tutti i vincoli diventano lineari in
+$z$ (per ogni $j = 1,\dots,p$ e $n = 1,\dots,N$):
+\begin{align}
+  -D_{j,n}\,u^n - e &\le Y^0_{j,n} - y_{\min}
+     && \text{tensione minima rilassata, eq.~(6e) e (17)} \\
+  \varepsilon_j - D_{j,n}\,u^n &\le Y^0_{j,n}
+     && \text{eq.~(10) e (13a), per } J_m \text{ e } J_\Delta \\
+  D_{j,n}\,u^n - \varepsilon_{p+j} &\le -Y^0_{j,n}
+     && \text{eq.~(13b), per } J_\Delta \\
+  u_{\min} \le u^n &\le u_{\max}
+     && \text{eq.~(6d)} \\
+  -e &\le 0 \\
+  \textstyle\sum_{n} u^n &= 0
+     && \text{eq.~(6f)}
+\end{align}
+Se la grandezza bilanciata è il SOC anziché la tensione, nel costo e nei
+vincoli sulle $\varepsilon$ si usano $\bar S$ ed $E$ al posto di $\bar Y$ e
+$D$; il vincolo di tensione minima usa sempre $\bar Y$ e $D$.
+
+\subsection{Punto di partenza del solutore}
+
+Nel punto $u = \bar u$ la predizione linearizzata coincide con la traiettoria
+di linearizzazione, quindi un punto ammissibile si scrive direttamente:
+\[
+  u = \bar u, \qquad
+  \varepsilon_j = \min_n \bar Y_{j,n}, \qquad
+  \varepsilon_{p+j} = \max_n \bar Y_{j,n}, \qquad
+  e = \max\bigl(0,\; y_{\min} - \min_{j,n} \bar Y_{j,n}\bigr).
+\]
+\texttt{quadprog} (algoritmo \texttt{active-set}) parte da lì. Se non trova una
+soluzione, l'uscita è questo punto: la mossa precedente viene mantenuta.
+
+\section{Riepilogo di un passo di controllo}\label{sec:riepilogo}
+
+\begin{enumerate}
+  \item Si campionano $s_k$, $V_{p,k}$ di ogni cella e la corrente di pacco $i_k$.
+  \item \file{Cella_nominale}: si calcola il riferimento $r_1,\dots,r_p$
+        integrando una cella senza deviazioni dalla media degli stati.
+  \item \file{Predizione_linearizzata}: con la corrente $i_k + u^n_{k-1}$ si
+        calcolano la traiettoria di linearizzazione $\bar Y$, $\bar S$, con le
+        \eqref{eq:soc}--\eqref{eq:y}, e i coefficienti di sensibilità $D$ ed
+        $E$, con le \eqref{eq:beta}--\eqref{eq:D}.
+  \item \file{Problema_QP}: si costruiscono $H$, $f$, $A$, $b$, $A_{eq}$,
+        $b_{eq}$ e il punto di partenza.
+  \item \file{Solutore_QP}: \texttt{quadprog} restituisce $z$; al pacco si
+        applicano solo le prime $N$ componenti, $u_k$.
+  \item $u_k$ viene memorizzata: sarà il punto di linearizzazione del passo
+        successivo.
+\end{enumerate}
+La linearizzazione viene fatta una sola volta per passo, senza iterare.
+
+\section{Quanto è accurata}\label{sec:accuratezza}
+
+Nel documento compaiono due approssimazioni diverse, che conviene tenere
+distinte. La prima è la discretizzazione del modello
+(sezione~\ref{sec:discreto}): riguarda il modello di predizione, ed è la
+stessa per il problema non lineare e per il QP. La seconda è la
+linearizzazione, cioè la sostituzione della predizione con la retta
+\eqref{eq:lin}: è la sola differenza tra il QP e il problema non lineare, ed è
+quella di cui si occupa questa sezione.
+
+La linearizzazione introduce errore solo dove il modello non è lineare nella
+corrente:
+\begin{itemize}
+  \item il SOC è esattamente lineare in $u$, come mostra la \eqref{eq:alpha},
+        tranne quando una cella satura a 1;
+  \item la tensione non lo è per i prodotti $R_o(s)\,I$ e $I/C_p(s)$, per
+        $\tau(s)$ e per i cambi di pendenza delle tabelle quando il SOC
+        attraversa uno dei 7 punti lungo l'orizzonte.
+\end{itemize}
+L'errore cresce con la distanza tra $u_k$ e $u_{k-1}$ e con la lunghezza
+dell'orizzonte $p\,\Tc$: come si è visto nell'esempio numerico, i termini
+dovuti alla non linearità crescono con il numero di passi.
+
+La Tabella~\ref{tab:confronto} confronta, sullo scenario a f.e.m.\ costante, il
+QP linearizzato con la soluzione del problema non lineare (\texttt{nlmpc}),
+usando un unico passo per integrazione e controllo. In una prova separata, con
+$\Tc = 20$~s e $p = 30$, ripetere la linearizzazione tre volte per passo non ha
+cambiato le durate.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{llcccc}
+\toprule
+ & & \multicolumn{2}{c}{Durata [s]} & Scarto massimo & Sforzo medio [A$^2$] \\
+Configurazione & Costo & \texttt{nlmpc} & QP & su $u$ [A] & \texttt{nlmpc} / QP \\
+\midrule
+$N=5$, $\Tc=1$ s, $p=5$   & $J_t$      & 2529 & 2529 & $3{,}7\cdot10^{-3}$ & 5,3526 / 5,3526 \\
+(orizzonte 5 s)           & $J_m$      & 2478 & 2478 & $9{,}3\cdot10^{-4}$ & 0,7825 / 0,7825 \\
+                          & $J_\Delta$ & 2488 & 2488 & $3{,}5\cdot10^{-3}$ & 1,2847 / 1,2847 \\
+\midrule
+$N=3$, $\Tc=20$ s, $p=30$ & $J_t$      & 8120 & 8120 & $0{,}17$            & 1,0733 / 1,0742 \\
+(orizzonte 600 s)         & $J_m$      & 8120 & 8120 & $8{,}2\cdot10^{-3}$ & 1,1376 / 1,1375 \\
+                          & $J_\Delta$ & 8120 & 8120 & $0{,}28$            & 1,2143 / 1,2128 \\
+\bottomrule
+\end{tabular}
+\caption{QP linearizzato a confronto con il problema non lineare. Gli scarti
+maggiori del secondo caso compaiono in pochi passi isolati.}
+\label{tab:confronto}
+\end{table}
+
+\section{Dove si trova nel codice}\label{sec:codice}
+
+Nel modello \file{Bilanciamento_MPC.slx} ogni passaggio è un blocco del
+sottosistema \file{Controllo}, e ogni blocco chiama una funzione:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Passaggio & Blocco in \file{Controllo} & File \\
+\midrule
+Riferimento $r_j$ & \file{Cella_nominale} & \file{qp_cella_nominale.m} \\
+Predizione e derivate, sezione~\ref{sec:derdiscreto} & \file{Predizione_linearizzata} & \file{qp_predizione.m} \\
+Valore e derivata dei parametri, \eqref{eq:tabella} & --- & \file{qp_tabella.m} \\
+Matrici del QP e punto di partenza & \file{Problema_QP} & \file{qp_problema.m} \\
+Soluzione & \file{Solutore_QP} & \file{qp_solutore.m} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+La costruzione delle matrici del QP ha un documento a parte,
+\file{Problema_QP_MPC.pdf}, e una versione da leggere,
+\file{problema_qp_semplice.m}. \file{qp_predizione.m} applica le formule della
+predizione a tutte le celle insieme, con vettori. Per leggerle con più agio ci
+sono tre file che il modello non usa:
+\begin{itemize}
+  \item \file{predizione_linearizzata_semplice.m} fa lo stesso calcolo una
+        cella alla volta, con numeri singoli, ed è diviso nelle stesse parti di
+        questo documento (\file{cella_nominale_semplice.m} fa lo stesso per il
+        riferimento);
+  \item \file{Predizione_linearizzata_blocchi.slx} fa lo stesso calcolo con
+        blocchi Simulink, un sottosistema per ogni parte;
+  \item \file{esempio_sensibilita_ode45.m} applica le formule generali della
+        sezione~\ref{sec:sens} a un sistema massa-molla-smorzatore.
+\end{itemize}
+\file{predizione_linearizzata_semplice.m} usa la notazione di questo documento:
+ogni variabile ha il nome del simbolo corrispondente, e la derivata rispetto a
+$s$, qui indicata con l'apice, nel codice ha il prefisso \texttt{d}.
+
+\begin{center}
+\begin{tabular}{ll@{\qquad}ll}
+\toprule
+Simbolo & Nome nel codice & Simbolo & Nome nel codice \\
+\midrule
+$s_k$, $V_{p,k}$ & \file{s_k}, \file{Vp_k} & $s_{k+j}$, $V_{p,k+j}$ & \texttt{s}, \texttt{Vp} \\
+$i_k$, $\bar u$ & \file{i_k}, \file{u_bar} & $I$ & \texttt{I} \\
+$\Tc$, $\kappa$ & \texttt{Tc}, \texttt{kappa} & $\alpha_j$, $\beta_j$ & \texttt{alfa}, \texttt{beta} \\
+$V_{oc}$, $R_o$ & \texttt{Voc}, \texttt{Ro} & $V_{oc}'$, $R_o'$ & \texttt{dVoc}, \texttt{dRo} \\
+$R_p$, $C_p$, $\tau$ & \texttt{Rp}, \texttt{Cp}, \texttt{tau} & $R_p'$, $C_p'$, $\tau'$ & \texttt{dRp}, \texttt{dCp}, \texttt{dtau} \\
+$f_{R_o}$, $R_o^{\nom}$ & \file{f_Ro}, \file{tabella_Ro} & $y_{k+j}$, $D_j$, $E_j$ & \texttt{y}, \texttt{D}, \texttt{E} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+I fattori e le tabelle degli altri parametri seguono lo stesso schema
+(\file{f_Voc}, \file{tabella_Voc}, e così via). Le quattro matrici restituite
+si chiamano \texttt{Y}, \texttt{S}, \texttt{dY}, \texttt{dS}: raccolgono $y$,
+$s$, $D$ ed $E$ di tutti i passi e di tutte le celle.
+
+\end{document}
