@@ -13,6 +13,11 @@ matlab = load(fullfile(cartella, 'risultati', 'A_risultati.mat'));
 par    = matlab.par;
 pacco  = matlab.pacco;
 
+% simula_pacco usa un solo passo, par.mpc.Ts, anche per integrare il modello
+% fisico: per confrontare le due simulazioni istante per istante il modello
+% Simulink deve integrare con lo stesso passo
+par.sim.Ts_integrazione = par.mpc.Ts;
+
 fprintf('Ts = %g s, N = %d celle\n', par.mpc.Ts, pacco.numero_celle);
 fprintf('%-10s %3s %12s %12s %12s %12s %14s\n', 'Controllo', 'p', 'MATLAB [s]', ...
     'Simulink [s]', 'max|du| [A]', 'max|dy| [V]', 'Sforzo [A^2]');

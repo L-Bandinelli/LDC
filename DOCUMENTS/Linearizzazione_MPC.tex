@@ -13,6 +13,7 @@
 \newcommand{\file}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\Tc}{T_c}
 \newcommand{\nom}{\mathrm{nom}}
+\newcommand{\lib}{\mathrm{lib}}
 
 \title{Linearizzazione della predizione\\nell'MPC di bilanciamento attivo}
 \author{Modello Simulink \file{Bilanciamento_MPC.slx}}
@@ -30,13 +31,14 @@ derivate che servono per farlo.
 \section{Perché serve linearizzare}
 
 A ogni passo di controllo l'MPC risolve il problema (eq.~6): scegliere le
-correnti di bilanciamento $u^1,\dots,u^N$, costanti su tutto l'orizzonte, che
-minimizzano un costo costruito sulle tensioni predette delle celle. Le tensioni
-predette dipendono da $u$ attraverso il modello di cella, che non è lineare: i
-parametri $V_{oc}$, $R_o$, $R_p$, $C_p$ dipendono dallo stato di carica.
+correnti di bilanciamento $u^1_k,\dots,u^N_k$, costanti su tutto l'orizzonte,
+che minimizzano un costo costruito sulle tensioni predette delle celle. Le
+tensioni predette dipendono da $u_k$ attraverso il modello di cella, che non è
+lineare: i parametri $V_{oc}$, $R_o$, $R_p$, $C_p$ dipendono dallo stato di
+carica.
 
 Se il modello fosse lineare, le tensioni predette sarebbero funzioni lineari
-di $u$: il costo sarebbe quadratico, i vincoli lineari, e il problema un
+di $u_k$: il costo sarebbe quadratico, i vincoli lineari, e il problema un
 programma quadratico (QP), per cui esistono solutori rapidi e affidabili come
 \texttt{quadprog}. Con il modello non lineare questo non vale più. Il paper
 (Remark~3) osserva però che basta linearizzare il modello di predizione a ogni
@@ -72,11 +74,23 @@ seguenti.
         questo documento che il codice applica, tutte a tempo discreto. Le
         equazioni a tempo continuo, che servono a capire da dove vengono le
         prime, sono numerate (C1), (C2), \dots; la (T) è la lettura delle
-        tabelle.
+        tabelle; (U1)--(U3) descrivono la corrente di bilanciamento lungo
+        l'orizzonte, all'inizio della sezione~\ref{sec:qp}; (Q1)--(Q4) sono i
+        passaggi intermedi che portano alla (11), nella
+        sezione~\ref{sec:costo}.
   \item \emph{Indici.} $n = 1,\dots,N$ è la cella, scritta come indice in alto
-        ($u^n$, $I^n$) e sottintesa quando si parla di una cella sola; $k$ è
+        ($u^n_k$, $I^n$) e sottintesa quando si parla di una cella sola; $k$ è
         l'istante attuale; $j = 1,\dots,p$ è il passo lungo l'orizzonte; $t$ è
         il tempo continuo, misurato a partire dall'istante attuale.
+  \item \emph{Correnti di bilanciamento.} $u^n_k$ è la corrente di
+        bilanciamento della cella $n$ che l'MPC sceglie all'istante $k$, e
+        $u_k = (u^1_k, \dots, u^N_k)$ il vettore delle $N$ correnti; nei
+        passaggi su una cella sola, dove $n$ è sottinteso, $u_k$ indica la
+        corrente di quella cella. Il pedice è $k$ e non $k+j$ perché la
+        corrente scelta in $k$ resta la stessa per tutti i passi
+        dell'orizzonte (sezione~\ref{sec:modello}; in forma matematica,
+        \eqref{eq:u-costante} nella sezione~\ref{sec:qp}). La corrente scelta
+        al passo precedente è $u^n_{k-1}$.
   \item \emph{Derivate.} Il punto indica la derivata rispetto al tempo,
         $\dot x = dx/dt$; l'apice la derivata rispetto al SOC,
         $\tau' = d\tau/ds$.
@@ -93,11 +107,16 @@ $(s, V_p)$: stato di carica (SOC) e tensione di polarizzazione. La corrente
 della cella è la somma della corrente di pacco e di quella di bilanciamento
 (eq.~3),
 \begin{equation}
-  I^n = i_k + u^n ,
+  I^n = i_k + u^n_k ,
 \end{equation}
-dove $i_k$ è la corrente di pacco misurata all'istante $k$. Sull'orizzonte di
+dove $i_k$ è la corrente di pacco misurata all'istante $k$ e $u^n_k$ la
+corrente di bilanciamento che l'MPC sceglie all'istante $k$. Sull'orizzonte di
 predizione i due addendi sono entrambi costanti: $i_k$ perché della corrente
-di pacco non si ha un'anteprima, $u^n$ perché così è formulato il problema.
+di pacco non si ha un'anteprima, $u^n_k$ perché così è formulato il problema.
+Il paper sceglie infatti una sola corrente per cella e la tiene invariata per
+tutti i $p$ passi (eq.~6b, dove compare $i_{k+j} + u^n_k$): per questo il suo
+pedice è $k$, l'istante in cui è decisa, e non $k+j$. All'istante successivo
+il problema si risolve di nuovo e si sceglie $u^n_{k+1}$.
 Lungo l'orizzonte $I^n$ è quindi una costante: non un segnale che varia nel
 tempo, ma un \emph{parametro} da cui dipende tutta la traiettoria della cella.
 Su questa osservazione si regge il calcolo delle derivate della
@@ -278,8 +297,9 @@ tutti noti all'istante $k$:
   \item la corrente di pacco misurata $i_k$;
   \item la mossa del passo precedente, $\bar u^n = u^n_{k-1}$.
 \end{itemize}
-Con la corrente $I^n = i_k + \bar u^n$ le \eqref{eq:soc}--\eqref{eq:y} danno,
-per ogni cella, la \emph{traiettoria di linearizzazione}
+Ponendo $u^n_k = \bar u^n$, cioè con la corrente $I^n = i_k + \bar u^n$, le
+\eqref{eq:soc}--\eqref{eq:y} danno, per ogni cella, la \emph{traiettoria di
+linearizzazione}
 \[
   \bar Y_{j,n} = y^n_{k+j}(\bar u^n), \qquad
   \bar S_{j,n} = s^n_{k+j}(\bar u^n), \qquad j=1,\dots,p,\; n=1,\dots,N .
@@ -302,28 +322,32 @@ il nome di linearizzazione successiva.
 \section{Sviluppo al primo ordine}\label{sec:sviluppo}
 
 Le celle non si influenzano tra loro nella predizione: tensione e SOC della
-cella $n$ dipendono solo dalla sua corrente $u^n$. Per ogni cella e per ogni
+cella $n$ dipendono solo dalla sua corrente $u^n_k$. Per ogni cella e per ogni
 passo $j$ basta quindi lo sviluppo al primo ordine di una funzione di una sola
 variabile, attorno a $\bar u^n$:
 \begin{equation}
 \begin{aligned}
-  y^n_{k+j}(u^n) &\;\simeq\; \bar Y_{j,n} + D_{j,n}\,\bigl(u^n - \bar u^n\bigr),
+  y^n_{k+j}(u^n_k) &\;\simeq\; \bar Y_{j,n} + D_{j,n}\,\bigl(u^n_k - \bar u^n\bigr),
   &\qquad
-  D_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n}\right|_{\bar u^n} , \\[6pt]
-  s^n_{k+j}(u^n) &\;\simeq\; \bar S_{j,n} + E_{j,n}\,\bigl(u^n - \bar u^n\bigr),
+  D_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} , \\[6pt]
+  s^n_{k+j}(u^n_k) &\;\simeq\; \bar S_{j,n} + E_{j,n}\,\bigl(u^n_k - \bar u^n\bigr),
   &\qquad
-  E_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n}\right|_{\bar u^n} .
+  E_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} .
 \end{aligned}
 \label{eq:lin}
 \end{equation}
+Gli istanti nei pedici sono due e hanno ruoli diversi: $k+j$ è l'istante in
+cui si guarda la cella, $k$ quello in cui si sceglie la corrente. La stessa
+$u^n_k$ agisce su tutti i passi dell'orizzonte, quindi la tensione e il SOC a
+ogni passo $j$ sono funzioni di questo solo numero.
 I termini noti $\bar Y$ e $\bar S$ sono la traiettoria di linearizzazione
 della sezione~\ref{sec:punto}. $D_{j,n}$ ed $E_{j,n}$ sono i \emph{coefficienti
 di sensibilità} della predizione: dicono di quanto cambiano, tra $j$ passi, la
 tensione e il SOC della cella $n$ per ogni ampere in più di corrente di
 bilanciamento. Per ogni $j$ e $n$ la prima riga della \eqref{eq:lin} è la
-retta tangente, nel punto $\bar u^n$, alla curva vera $y^n_{k+j}(u^n)$:
-coincide con essa in $\bar u^n$ e se ne allontana man mano che $u^n$ si scosta
-da $\bar u^n$.
+retta tangente, nel punto $\bar u^n$, alla curva vera $y^n_{k+j}(u^n_k)$:
+coincide con essa in $\bar u^n$ e se ne allontana man mano che $u^n_k$ si
+scosta da $\bar u^n$.
 
 Poiché ogni cella dipende solo dalla propria corrente, bastano quattro matrici
 $p\times N$ (nel codice \texttt{Y}, \texttt{S}, \texttt{dY}, \texttt{dS})
@@ -332,8 +356,8 @@ invece di una jacobiana $pN \times N$.
 Se il modello fosse lineare, $D$ ed $E$ sarebbero numeri fissi, calcolabili una
 volta per tutte, e la \eqref{eq:lin} sarebbe un'uguaglianza. Con il modello non
 lineare dipendono invece dal punto di linearizzazione: vanno ricalcolati a ogni
-passo di controllo, e la \eqref{eq:lin} è un'approssimazione, buona finché $u$
-resta vicina a $\bar u$.
+passo di controllo, e la \eqref{eq:lin} è un'approssimazione, buona finché
+$u_k$ resta vicina a $\bar u$.
 
 A questo punto $\bar Y$ e $\bar S$ si ottengono facendo avanzare il modello
 \eqref{eq:soc}--\eqref{eq:y} con la corrente $i_k + \bar u^n$. Restano da
@@ -347,10 +371,10 @@ della tensione e del SOC predetti, all'istante $k+j$, rispetto alla corrente
 di bilanciamento della stessa cella, valutate nel punto di linearizzazione.
 Tre premesse valgono per tutta la sezione.
 \begin{itemize}
-  \item \emph{Si deriva rispetto a $I$.} Poiché $I^n = i_k + u^n$ e $i_k$ è
-        fissata, un ampere in più di $u^n$ è un ampere in più di $I^n$:
-        derivare rispetto a $u^n$ equivale a derivare rispetto a $I^n$. Il
-        punto di linearizzazione $u^n = \bar u^n$ corrisponde alla corrente
+  \item \emph{Si deriva rispetto a $I$.} Poiché $I^n = i_k + u^n_k$ e $i_k$ è
+        fissata, un ampere in più di $u^n_k$ è un ampere in più di $I^n$:
+        derivare rispetto a $u^n_k$ equivale a derivare rispetto a $I^n$. Il
+        punto di linearizzazione $u^n_k = \bar u^n$ corrisponde alla corrente
         $I^n = i_k + \bar u^n$. Le formule che seguono valgono per qualunque
         valore della corrente; l'MPC le calcola con questo.
   \item \emph{Si considera una cella sola.} Le celle sono indipendenti, quindi
@@ -582,38 +606,38 @@ indica con $\bar s(t)$, $\bar V_p(t)$, $\bar y(t)$. Lungo questa traiettoria
 $\alpha(t)$ e $\beta(t)$ sono funzioni note del tempo: si calcolano una volta
 sola, prima di ottimizzare.
 
-L'MPC deve però confrontare correnti diverse: $i_k + u$, con $u$ ancora da
+L'MPC deve però confrontare correnti diverse: $i_k + u_k$, con $u_k$ ancora da
 scegliere. Ognuna differisce dalla corrente di linearizzazione di
-$u - \bar u$. È qui che servono $\alpha$ e $\beta$.
+$u_k - \bar u$. È qui che servono $\alpha$ e $\beta$.
 
 \paragraph{Primo uso: lo stato.} $\alpha$ e $\beta$ dicono dove si troverebbe
 lo stato con una di queste correnti, senza risolvere di nuovo le equazioni
 differenziali:
 \begin{align}
-  s(t;\, u) &\simeq \bar s(t) + \alpha(t)\,\bigl(u - \bar u\bigr) ,
+  s(t;\, u_k) &\simeq \bar s(t) + \alpha(t)\,\bigl(u_k - \bar u\bigr) ,
      \tag{C9}\label{eq:c-s-lin}\\
-  V_p(t;\, u) &\simeq \bar V_p(t) + \beta(t)\,\bigl(u - \bar u\bigr) .
+  V_p(t;\, u_k) &\simeq \bar V_p(t) + \beta(t)\,\bigl(u_k - \bar u\bigr) .
      \tag{C10}\label{eq:c-vp-lin}
 \end{align}
 Sono sviluppi al primo ordine: lo spostamento dello stato è la derivata
 moltiplicata per la variazione di corrente. Per il SOC la \eqref{eq:c-s-lin} è
 esatta finché la cella non satura; per $V_p$ la \eqref{eq:c-vp-lin} è
-un'approssimazione, buona se $u$ è vicina a $\bar u$.
+un'approssimazione, buona se $u_k$ è vicina a $\bar u$.
 
 \paragraph{Secondo uso: l'uscita.} È quello che interessa all'MPC. Sia $d(t)$
 la derivata dell'uscita \eqref{eq:c-dy}, calcolata lungo la traiettoria di
 linearizzazione. Allora
 \begin{equation}
-  y(t;\, u) \;\simeq\; \bar y(t) + d(t)\,\bigl(u - \bar u\bigr) ,
+  y(t;\, u_k) \;\simeq\; \bar y(t) + d(t)\,\bigl(u_k - \bar u\bigr) ,
   \qquad
   d(t) = V_{oc}'\,\alpha(t) - \beta(t) - R_o'\,\alpha(t)\,I - R_o .
   \tag{C11}\label{eq:c-y-lin}
 \end{equation}
 È la versione a tempo continuo della prima riga della \eqref{eq:lin}; la
 \eqref{eq:c-s-lin} lo è della seconda. Per ogni istante $t$ la
-\eqref{eq:c-y-lin} è una retta in $u$: la tangente, nel punto $\bar u$, alla
-curva vera $y(t;\, u)$. I due coefficienti $\bar y(t)$ e $d(t)$ non dipendono
-da $u$; l'incognita compare solo nel fattore $(u - \bar u)$. In $d(t)$ ogni
+\eqref{eq:c-y-lin} è una retta in $u_k$: la tangente, nel punto $\bar u$, alla
+curva vera $y(t;\, u_k)$. I due coefficienti $\bar y(t)$ e $d(t)$ non dipendono
+da $u_k$; l'incognita compare solo nel fattore $(u_k - \bar u)$. In $d(t)$ ogni
 termine ha un ruolo:
 \begin{itemize}
   \item $V_{oc}'\,\alpha$ e $R_o'\,\alpha\,I$ dicono di quanto cambiano la
@@ -627,15 +651,15 @@ termine ha un ruolo:
 
 \paragraph{Verso il QP.} L'MPC sostituisce la predizione vera con queste
 rette. Per vedere che cosa ne guadagna basta scrivere, a tempo continuo, un
-vincolo di tensione minima e un costo di inseguimento di un riferimento
-$r(t)$:
+vincolo di tensione minima e un costo che fa inseguire a ogni cella la
+tensione $y^0(t)$ della cella nominale:
 \begin{gather*}
-  \bar y^n(t) + d^n(t)\,\bigl(u^n - \bar u^n\bigr) \;\ge\; y_{\min}
+  \bar y^n(t) + d^n(t)\,\bigl(u^n_k - \bar u^n\bigr) \;\ge\; y_{\min}
   \qquad \text{per ogni } t \in [0,\; p\,\Tc] , \\[4pt]
   \int_0^{p\,\Tc} \sum_{n=1}^{N}
-     \Bigl(\bar y^n(t) + d^n(t)\,\bigl(u^n - \bar u^n\bigr) - r(t)\Bigr)^2 dt .
+     \Bigl(\bar y^n(t) + d^n(t)\,\bigl(u^n_k - \bar u^n\bigr) - y^0(t)\Bigr)^2 dt .
 \end{gather*}
-Il vincolo è lineare in $u$ e il costo quadratico: è già la struttura di un
+Il vincolo è lineare in $u_k$ e il costo quadratico: è già la struttura di un
 QP. In questa forma però i vincoli sono infiniti, uno per ogni istante, e il
 costo è un integrale. Il problema dell'MPC (eq.~6) è invece formulato solo agli
 istanti di campionamento $k+1, \dots, k+p$: bastano i valori di $\bar y$, $d$
@@ -1094,8 +1118,8 @@ derivate sono coerenti con quello.
 Con $D_j$ ed $E_j$ calcolati per ogni passo e per ogni cella, lo sviluppo
 \eqref{eq:lin} è completo:
 \[
-  y_{k+j}(u) \simeq \bar Y_j + D_j\,\bigl(u - \bar u\bigr), \qquad
-  s_{k+j}(u) \simeq \bar S_j + E_j\,\bigl(u - \bar u\bigr), \qquad
+  y_{k+j}(u_k) \simeq \bar Y_j + D_j\,\bigl(u_k - \bar u\bigr), \qquad
+  s_{k+j}(u_k) \simeq \bar S_j + E_j\,\bigl(u_k - \bar u\bigr), \qquad
   j = 1, \dots, p .
 \]
 Sono la \eqref{eq:c-y-lin} e la \eqref{eq:c-s-lin} negli istanti di
@@ -1109,17 +1133,101 @@ La sezione~\ref{sec:derivate} fornisce, per ogni cella $n$ e per ogni passo
 $j$, i quattro numeri della \eqref{eq:lin}: $\bar Y_{j,n}$, $\bar S_{j,n}$,
 $D_{j,n}$ ed $E_{j,n}$. Qui si vede, in sintesi, come entrano nel QP; la
 costruzione completa, con le motivazioni di ogni passaggio, è nel documento
-\file{Problema_QP_MPC.pdf}. Conviene anzitutto
-isolare nella \eqref{eq:lin} la parte che non dipende da $u$:
-\begin{equation}
-  y^n_{k+j}(u^n) \simeq Y^0_{j,n} + D_{j,n}\,u^n,
-  \qquad Y^0_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n .
-\end{equation}
-Le incognite del QP sono raccolte in
+\file{Problema_QP_MPC.pdf}.
+
+\paragraph{L'ingresso lungo l'orizzonte.} Prima di costruire il QP conviene
+precisare che cosa sia, matematicamente, l'incognita. All'istante $k$ l'MPC
+predice l'evoluzione delle celle sui passi $k+1, \dots, k+p$, e in generale
+potrebbe scegliere una corrente di bilanciamento diversa per ogni passo. Si
+indica con
 \[
-  z = \begin{bmatrix} u \\ \varepsilon \\ e \end{bmatrix},
+  u^n_{k+j\,|\,k}, \qquad j = 0, 1, \dots, p ,
 \]
-con $u \in \mathbb{R}^N$ le correnti di bilanciamento, $\varepsilon$ le
+la corrente che, all'istante $k$, si prevede di applicare alla cella $n$ al
+passo $k+j$: il pedice prima della barra verticale dice \emph{quando agisce},
+quello dopo \emph{quando è stata decisa}. È la notazione usuale dell'MPC. Allo
+stesso modo $i_{k+j\,|\,k}$ è la corrente di pacco prevista per il passo
+$k+j$. Con correnti che cambiano da un passo all'altro, il modello
+\eqref{eq:soc}--\eqref{eq:y} andrebbe scritto con la corrente del passo,
+$I^n_{k+j} = i_{k+j\,|\,k} + u^n_{k+j\,|\,k}$:
+\begin{align*}
+  s_{k+j} &= \min\bigl(s_{k+j-1} - \kappa^n I^n_{k+j-1},\; 1\bigr), \\
+  V_{p,k+j} &= V_{p,k+j-1} + \Tc \left( -\frac{V_{p,k+j-1}}{\tau(s_{k+j-1})}
+              + \frac{I^n_{k+j-1}}{C_p(s_{k+j-1})}\right), \\
+  y_{k+j} &= V_{oc}(s_{k+j}) - V_{p,k+j} - R_o(s_{k+j})\, I^n_{k+j} .
+\end{align*}
+Lo stato all'istante $k+j$ è il risultato delle correnti dei passi
+precedenti, da $k$ a $k+j-1$; la tensione ai morsetti dipende in più dalla
+corrente del passo stesso, attraverso la caduta su $R_o$. In generale,
+quindi, la tensione predetta è funzione di tutta la sequenza di correnti:
+\begin{equation}
+  y^n_{k+j} = y^n_{k+j}\bigl(u^n_{k\,|\,k},\; u^n_{k+1\,|\,k},\; \dots,\;
+              u^n_{k+j\,|\,k}\bigr),
+  \qquad j = 1, \dots, p .
+  \tag{U1}\label{eq:u-sequenza}
+\end{equation}
+Il paper (eq.~6b--6c) non sceglie una sequenza: sceglie una sola corrente per
+cella e la suppone costante su tutto l'orizzonte. Della corrente di pacco, di
+cui non si ha un'anteprima, suppone lo stesso:
+\begin{equation}
+  u^n_{k+j\,|\,k} = u^n_{k\,|\,k} \;=:\; u^n_k ,
+  \qquad
+  i_{k+j\,|\,k} = i_k ,
+  \qquad j = 1, \dots, p .
+  \tag{U2}\label{eq:u-costante}
+\end{equation}
+Il simbolo $u^n_k$ usato in tutto il documento è proprio questa corrente
+unica, decisa all'istante $k$. Con la \eqref{eq:u-costante} la corrente della
+cella è la stessa a ogni passo, $I^n_{k+j} = i_k + u^n_k = I^n$, cioè la
+costante della (1), e tutti gli argomenti della \eqref{eq:u-sequenza}
+coincidono:
+\begin{equation}
+  y^n_{k+j} = y^n_{k+j}\bigl(u^n_k,\; u^n_k,\; \dots,\; u^n_k\bigr)
+  \;\equiv\; y^n_{k+j}(u^n_k) ,
+  \qquad j = 1, \dots, p .
+  \tag{U3}\label{eq:u-unica}
+\end{equation}
+L'ultima scrittura è un leggero abuso di notazione: lo stesso simbolo
+$y^n_{k+j}$ indica la funzione di un solo argomento che si ottiene ponendo
+uguali tutti gli argomenti della \eqref{eq:u-sequenza}. È questa la funzione
+che la \eqref{eq:lin} linearizza. Lo stesso vale per il SOC,
+$s^n_{k+j}(u^n_k)$. Tre osservazioni sulla \eqref{eq:u-costante}:
+\begin{itemize}
+  \item \emph{È un'ipotesi della predizione, non del pacco.} Della corrente
+        decisa in $k$ si applica solo il primo passo. All'istante $k+1$ il
+        problema si risolve di nuovo, con le nuove misure, e si sceglie
+        $u^n_{k+1} = u^n_{k+1\,|\,k+1}$, in generale diversa da
+        $u^n_{k+1\,|\,k} = u^n_k$. La corrente applicata al pacco cambia
+        quindi da un passo all'altro: è costante solo dentro ciascuna
+        predizione.
+  \item \emph{Riduce le incognite.} Invece di una sequenza di correnti per
+        cella, le incognite sono $N$, una per cella. Il paper la giustifica
+        osservando che le correnti di bilanciamento variano lentamente
+        (sua Fig.~2).
+  \item \emph{Rende la predizione una funzione di una variabile.} Poiché ogni
+        $y^n_{k+j}$ dipende da un solo numero, la \eqref{eq:lin} è una retta
+        in $u^n_k$, e non uno sviluppo in $j+1$ variabili.
+\end{itemize}
+Da qui in avanti si scrive solo $u^n_k$, e anche nelle predizioni si omette
+``$|\,k$'': $y^n_{k+j}$ e $s^n_{k+j}$ sono sempre le grandezze previste
+all'istante $k$.
+
+\paragraph{Risposta libera e risposta forzata.} Conviene anzitutto isolare
+nella \eqref{eq:lin} la parte che non dipende da $u^n_k$:
+\begin{equation}
+  y^n_{k+j}(u^n_k) \simeq Y^\lib_{j,n} + D_{j,n}\,u^n_k,
+  \qquad Y^\lib_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n .
+  \label{eq:y0}
+\end{equation}
+$Y^\lib_{j,n}$ è la \emph{risposta libera}: il valore che la retta della cella
+$n$ dà in $u^n_k = 0$. Il prodotto $D_{j,n}\,u^n_k$ è la \emph{risposta forzata},
+l'effetto della corrente di bilanciamento.
+
+\paragraph{Il problema quadratico.} Le incognite del QP sono raccolte in
+\[
+  z = \begin{bmatrix} u_k \\ \varepsilon \\ e \end{bmatrix},
+\]
+con $u_k \in \mathbb{R}^N$ le correnti di bilanciamento scelte all'istante $k$, $\varepsilon$ le
 variabili ausiliarie del costo (nessuna per $J_t$, $p$ per $J_m$, $2p$ per
 $J_\Delta$) ed $e \ge 0$ la variabile che rilassa il vincolo di tensione
 (eq.~17). Il problema è
@@ -1130,48 +1238,272 @@ $J_\Delta$) ed $e \ge 0$ la variabile che rilassa il vincolo di tensione
 Qui $f$ è il vettore del termine lineare del costo, secondo la notazione di
 \texttt{quadprog}: non è la funzione $f(x, I)$ della
 sezione~\ref{sec:modello}. In tutte le formulazioni il costo contiene
-$\rho\, u^\top u + W e^2$, con $\rho = r\,p/p_{\mathrm{rif}}$: contribuiscono a
-$H$ con $2\rho$ sulla diagonale delle $u$ e $2W$ su $e$.
+$\rho\, u_k^\top u_k + W e^2$, dove $\rho$ è il peso sulle correnti di
+bilanciamento (la matrice $R$ del paper vale $\rho$ volte l'identità; nel
+codice $\rho$ è \texttt{par.mpc.r} moltiplicato per $p/p_{\mathrm{rif}}$) e $W$
+il peso su $e$. Contribuiscono a $H$ con $2\rho$ sulla diagonale delle correnti e
+$2W$ su $e$; da dove venga il fattore 2 si vede nella
+sezione~\ref{sec:costo}, a proposito di $J_t$.
 
-\subsection{Costo}
+\subsection{Costo}\label{sec:costo}
 
-\paragraph{$J_t$, inseguimento della cella nominale (eq.~7).} Detto $r_j$ il
-riferimento al passo $j$ (blocco \file{Cella_nominale}), il termine di
-inseguimento è
+Il costo è la somma di un termine di bilanciamento, diverso per ogni
+formulazione, e dei due termini comuni $\rho\, u_k^\top u_k$ e $W e^2$. Il termine
+di $J_t$ è svolto qui passo per passo: è l'unico in cui la linearizzazione
+produce termini di secondo grado, e i passaggi sono gli stessi che servono
+per leggere $H$ e $f$ da qualunque costo. Quelli di $J_m$ e $J_\Delta$ sono
+di primo grado e si leggono subito.
+
+\subsubsection{$J_t$, inseguimento della cella nominale (eq.~7)}
+
+\paragraph{Il costo da minimizzare.} La eq.~7 del paper somma, passo per
+passo, il quadrato della lunghezza di un vettore di $N$ componenti, una per
+cella. Scritta elemento per elemento, con la tensione come grandezza
+bilanciata, è
 \[
-  \sum_{j=1}^{p}\sum_{n=1}^{N} \bigl(Y^0_{j,n} + D_{j,n}\,u^n - r_j\bigr)^2 ,
+  J_t(u_k) \;=\; \sum_{j=1}^{p} \sum_{n=1}^{N} \bigl(y^n_{k+j} - y^0_{k+j}\bigr)^2
+  \;+\; \rho \sum_{n=1}^{N} (u^n_k)^2 ,
 \]
-quadratico in $u$ grazie alla linearizzazione. Sviluppando il quadrato:
+con:
+\begin{itemize}
+  \item $y^n_{k+j}$, la tensione predetta della cella $n$ all'istante $k+j$:
+        per la \eqref{eq:u-unica} dipende dalla sola incognita $u^n_k$;
+  \item $y^0_{k+j}$, la tensione della \emph{cella nominale} all'istante
+        $k+j$, cioè il riferimento che ogni cella insegue. Come nel paper,
+        l'apice 0 al posto dell'indice di cella $n$ indica la cella nominale:
+        parametri senza deviazioni, partita dalla media degli stati del
+        pacco. La calcola il blocco \file{Cella_nominale}. È la stessa per
+        tutte le celle e non dipende da $u_k$: per il QP è un numero noto. Il
+        paper la scrive $\sigma^0$, che con $\sigma = y$ è proprio $y^0$; nella
+        eq.~7 compare come $\sigma^0_{k+1}$, ma la tensione nominale cambia
+        lungo l'orizzonte e va letta $\sigma^0_{k+j}$;
+  \item $\rho$, il peso sulle correnti.
+\end{itemize}
+Il primo termine misura quanto ogni cella si allontana dalla cella nominale,
+a ogni passo; il secondo rende costose le correnti grandi.
+
+\paragraph{Due tensioni da non confondere.} $y^0_{k+j}$ e $Y^\lib_{j,n}$ sono
+due tensioni diverse. $y^0_{k+j}$ è della cella nominale, una sola per tutto
+il pacco. $Y^\lib_{j,n}$, definita nella \eqref{eq:y0}, è della cella $n$: è
+il valore che la sua retta dà in $u^n_k = 0$. Coincide con la tensione che la
+cella avrebbe senza bilanciamento solo se $\bar u^n = 0$; altrimenti è il
+prolungamento della tangente fino a $u^n_k = 0$.
+
+\paragraph{Passo 1: sostituire la retta.} Con la \eqref{eq:y0} la distanza
+dalla cella nominale diventa
+\[
+  y^n_{k+j} - y^0_{k+j}
+  = Y^\lib_{j,n} + D_{j,n}\,u^n_k - y^0_{k+j}
+  = D_{j,n}\,u^n_k + c_{j,n} ,
+  \qquad
+  c_{j,n} = Y^\lib_{j,n} - y^0_{k+j} .
+\]
+$c_{j,n}$ è lo \emph{scarto}: di quanto, secondo la retta, la cella $n$
+starebbe sopra ($c_{j,n} > 0$) o sotto ($c_{j,n} < 0$) la cella nominale
+all'istante $k+j$ con $u^n_k = 0$. Come $D_{j,n}$, è un numero noto prima di
+ottimizzare. Il costo diventa
 \begin{equation}
-  H_{u^n u^n} = 2\sum_{j=1}^{p} D_{j,n}^2 + 2\rho, \qquad
-  f_{u^n} = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^0_{j,n} - r_j\bigr) .
+  J_t(u_k) = \sum_{j=1}^{p} \sum_{n=1}^{N} \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2
+           + \rho \sum_{n=1}^{N} (u^n_k)^2 .
+  \tag{Q1}\label{eq:q-jt}
 \end{equation}
-Il blocco delle $u$ in $H$ è diagonale: le celle sono accoppiate solo dal
-vincolo sulla somma delle correnti.
 
-\paragraph{$J_m$, massimizzazione della cella più bassa (eq.~9--10).} Il costo
-è $-\sum_j \varepsilon_j$, lineare; il minimo sulle celle è espresso dai
-vincoli $\varepsilon_j \le y^n_{k+j}$ per ogni $n$.
+\paragraph{Passo 2: separare le celle.} Le due somme sono finite, quindi si
+può scambiarne l'ordine e portare il termine in $\rho$ dentro la somma sulle
+celle:
+\begin{equation}
+  J_t(u_k) = \sum_{n=1}^{N} J^n(u^n_k) ,
+  \qquad
+  J^n(u^n_k) = \sum_{j=1}^{p} \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2 + \rho\,(u^n_k)^2 .
+  \tag{Q2}\label{eq:q-separa}
+\end{equation}
+Ogni $J^n$ contiene una sola incognita, $u^n_k$: il costo è la somma di $N$
+funzioni di una variabile, una per cella. Ne segue che nel costo non
+compaiono prodotti misti $u^n_k u^m_k$ con $n \ne m$, e quindi che il blocco di
+$H$ relativo alle correnti è diagonale. Le celle restano accoppiate solo dai
+vincoli, attraverso $\sum_n u^n_k = 0$ (sezione~\ref{sec:vincoli}).
 
-\paragraph{$J_\Delta$, minima differenza tra le celle (eq.~12--13).} Il costo è
-$\sum_j \varepsilon_{p+j} - \sum_j \varepsilon_j$, con in più i vincoli
-$\varepsilon_{p+j} \ge y^n_{k+j}$.
+\paragraph{Passo 3: sviluppare il quadrato.} Si fissa una cella. Per
+alleggerire la scrittura, in questo passo e nel prossimo l'indice $n$ è
+sottinteso: $D_j$, $c_j$ e $u$ stanno per $D_{j,n}$, $c_{j,n}$ e $u^n_k$. Ogni
+addendo della \eqref{eq:q-separa} è il quadrato di un binomio:
+\[
+  (D_j\,u + c_j)^2 = D_j^2\,u^2 + 2\,D_j\,c_j\,u + c_j^2 .
+\]
+Con un orizzonte di due passi, $p = 2$, il conto per esteso è
+\begin{align*}
+  J^n(u) &= (D_1 u + c_1)^2 + (D_2 u + c_2)^2 + \rho\,u^2 \\
+         &= D_1^2 u^2 + 2 D_1 c_1 u + c_1^2
+            \;+\; D_2^2 u^2 + 2 D_2 c_2 u + c_2^2
+            \;+\; \rho\,u^2 \\
+         &= \bigl(D_1^2 + D_2^2 + \rho\bigr)\, u^2
+            + 2\,\bigl(D_1 c_1 + D_2 c_2\bigr)\, u
+            + \bigl(c_1^2 + c_2^2\bigr) .
+\end{align*}
+Nell'ultima riga si sono raccolti i termini con $u^2$, quelli con $u$ e
+quelli senza $u$. Per un orizzonte qualsiasi si raccoglie allo stesso modo:
+\begin{equation}
+  J^n(u) = \underbrace{\Bigl(\sum_{j=1}^{p} D_j^2 + \rho\Bigr)}_{\text{coefficiente di } u^2}\, u^2
+         + \underbrace{\Bigl(2\sum_{j=1}^{p} D_j\,c_j\Bigr)}_{\text{coefficiente di } u}\, u
+         + \underbrace{\sum_{j=1}^{p} c_j^2}_{\text{costante}} .
+  \tag{Q3}\label{eq:q-sviluppo}
+\end{equation}
+$J^n$ è quindi un polinomio di secondo grado in $u$, con tre coefficienti
+noti.
 
-\subsection{Vincoli}
+\paragraph{Passo 4: confrontare con la forma di \texttt{quadprog}.}
+\texttt{quadprog} vuole il costo nella forma $\tfrac12\, z^\top H z + f^\top
+z$. Le correnti occupano le prime $N$ posizioni di $z$, quindi $u^n_k = z_n$,
+e i suoi coefficienti in $H$ e in $f$ sono $H_{nn}$ e $f_n$. Poiché $H$ non ha
+prodotti misti tra le correnti (passo 2), la parte di questa espressione che
+contiene $u^n_k$ è
+\[
+  \tfrac12\, H_{nn}\,(u^n_k)^2 + f_n\, u^n_k
+\]
+(è la regola di \file{Problema_QP_MPC.pdf}, sezione~2.2). Perché i due costi
+abbiano lo stesso punto di minimo devono avere gli stessi coefficienti di
+$u^2$ e di $u$; la costante si può trascurare, perché sommare una costante a
+un costo ne sposta il valore ma non il punto in cui è minimo. Confrontando con
+la \eqref{eq:q-sviluppo}:
+\[
+  \tfrac12\, H_{nn} = \sum_{j=1}^{p} D_j^2 + \rho
+  \quad\Longrightarrow\quad
+  H_{nn} = 2\sum_{j=1}^{p} D_j^2 + 2\rho ,
+  \qquad\qquad
+  f_n = 2\sum_{j=1}^{p} D_j\,c_j .
+\]
+Rimettendo l'indice $n$ e ricordando che $c_{j,n} = Y^\lib_{j,n} - y^0_{k+j}$:
+\begin{equation}
+  H_{nn} = 2\sum_{j=1}^{p} D_{j,n}^2 + 2\rho, \qquad
+  f_n = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^\lib_{j,n} - y^0_{k+j}\bigr) .
+  \label{eq:jt-hf}
+\end{equation}
+I due fattori 2 hanno origini diverse. Quello in $H$ compensa il
+$\tfrac12$ della forma di \texttt{quadprog}, che è una convenzione: con esso il
+gradiente del costo è $Hz + f$ e $H$ è la matrice delle derivate seconde.
+Quello in $f$ viene dal doppio prodotto del binomio. Lo stesso ragionamento,
+applicato a $\rho\,(u^n_k)^2$ e a $W e^2$ da soli, dà i contributi $2\rho$ e
+$2W$ citati all'inizio della sezione.
+
+\paragraph{Verifica: il minimo per una cella.} Ignorando per un momento i
+vincoli, $J^n$ è una parabola in $u$. Il coefficiente di $u^2$,
+$\sum_j D_j^2 + \rho$, è positivo, quindi la parabola è rivolta verso l'alto e
+ha un solo minimo, dove la derivata si annulla:
+\[
+  \frac{dJ^n}{du} = 2\Bigl(\sum_j D_j^2 + \rho\Bigr) u + 2\sum_j D_j\,c_j
+                  = H_{nn}\, u + f_n = 0 .
+\]
+Ne segue
+\begin{equation}
+  u^{n,*}_k = -\frac{f_n}{H_{nn}}
+        = \frac{\sum_{j} D_{j,n}\,\bigl(y^0_{k+j} - Y^\lib_{j,n}\bigr)}
+               {\sum_{j} D_{j,n}^2 + \rho} .
+  \tag{Q4}\label{eq:q-minimo}
+\end{equation}
+Lo stesso risultato si ottiene derivando direttamente la
+\eqref{eq:q-separa}, senza sviluppare i quadrati: per la regola della
+funzione composta $\frac{d}{du}(D_j u + c_j)^2 = 2 D_j\,(D_j u + c_j)$, e
+sommando su $j$ si ritrova la stessa equazione. È una conferma che
+$H_{nn}$ e $f_n$ sono giusti.
+
+La \eqref{eq:q-minimo} è la soluzione di un problema ai minimi quadrati: ci
+sono $p$ scarti da colmare e una sola corrente, che al passo $j$ sposta la
+tensione di $D_{j,n}\,u^n_k$. Non potendo annullarli tutti con un solo numero,
+si sceglie quello che rende minima la somma dei quadrati di ciò che resta. Il
+peso $\rho$ al denominatore frena la corrente. Anche il segno torna: se la
+cella sta sopra la cella nominale ($c_{j,n} > 0$), essendo $D_{j,n} < 0$
+risulta $u^{n,*}_k > 0$, cioè la cella viene scaricata di più e la sua tensione
+scende verso $y^0_{k+j}$.
+
+\paragraph{Esempio numerico.} Si considera una cella sola e un orizzonte di
+due passi, $p = 2$; come nei passi 3 e 4, l'indice di cella è sottinteso, $u$
+sta per $u^n_k$ e $u^*$ per $u^{n,*}_k$.
+I coefficienti di sensibilità sono quelli calcolati
+nell'esempio della sezione~\ref{sec:derdiscreto} (cella con fattori di
+deviazione uguali a 1, $s_k = 0{,}6$, $I = 10$~A), nelle colonne $j = 1$ e
+$j = 2$:
+\[
+  D_1 = -9{,}220 \cdot 10^{-3}~\text{V/A}, \qquad
+  D_2 = -9{,}853 \cdot 10^{-3}~\text{V/A}.
+\]
+Gli scarti $c_j = Y^\lib_j - y^0_{k+j}$ sono valori di prova,
+$c_1 = +20$~mV e $c_2 = +25$~mV: la cella sta sopra la cella nominale e se ne
+allontana. Il peso, con i valori di
+\file{init_parametri.m} (\texttt{par.mpc.r.Jt} $= 2 \cdot 10^{-4}$,
+$p_{\mathrm{rif}} = 5$), è $\rho = 2 \cdot 10^{-4} \cdot 2/5 = 8 \cdot
+10^{-5}$. Il costo è in V$^2$ e $u$ in ampere, quindi $D_j^2$ e $\rho$ sono in
+V$^2$/A$^2$ e $D_j c_j$ in V$^2$/A.
+
+I due coefficienti della \eqref{eq:q-sviluppo} che contengono $u$ valgono
+\begin{align*}
+  D_1^2 + D_2^2 + \rho
+    &= 0{,}8501 \cdot 10^{-4} + 0{,}9708 \cdot 10^{-4} + 0{,}8000 \cdot 10^{-4}
+     = 2{,}6209 \cdot 10^{-4} , \\
+  2\,(D_1 c_1 + D_2 c_2)
+    &= 2\,\bigl(-1{,}8440 \cdot 10^{-4} - 2{,}4633 \cdot 10^{-4}\bigr)
+     = -8{,}6145 \cdot 10^{-4} ,
+\end{align*}
+quindi $H_{11} = 2 \cdot 2{,}6209 \cdot 10^{-4} = 5{,}2418 \cdot 10^{-4}$ e
+$f_1 = -8{,}6145 \cdot 10^{-4}$. La \eqref{eq:q-minimo} dà
+\[
+  u^* = -\frac{f_1}{H_{11}} = \frac{8{,}6145}{5{,}2418} = 1{,}643~\text{A}.
+\]
+Con questa corrente la retta dà, rispetto alla cella nominale,
+\begin{align*}
+  y_{k+1} - y^0_{k+1} &= D_1 u^* + c_1 = -15{,}15 + 20 = +4{,}85~\text{mV}
+    && \text{al primo passo}, \\
+  y_{k+2} - y^0_{k+2} &= D_2 u^* + c_2 = -16{,}19 + 25 = +8{,}81~\text{mV}
+    && \text{al secondo}:
+\end{align*}
+la cella si avvicina alla cella nominale ma non la raggiunge, perché $\rho$
+rende la corrente costosa.
+Con $\rho = 0$ si avrebbe $u^* = 4{,}3073/1{,}8209 = 2{,}365$~A e gli scarti
+residui diventerebbero $-1{,}81$~mV e $+1{,}69$~mV: uno sotto e uno sopra,
+perché una sola corrente non può annullare due scarti diversi e sceglie il
+compromesso con la minima somma dei quadrati.
+
+\paragraph{Più celle e vincoli.} Con $N$ celle ogni cella porta i propri
+$H_{nn}$ e $f_n$ nella propria posizione, e il blocco delle correnti in $H$ è
+la matrice diagonale con elementi $H_{11}, \dots, H_{NN}$. Le correnti ideali
+\eqref{eq:q-minimo} in generale non rispettano $\sum_n u^n_k = 0$: se per
+esempio tutte le celle stanno sopra la cella nominale, sono tutte positive. Il
+vincolo sulla somma lega le celle e \texttt{quadprog} cerca, tra le correnti a
+somma nulla e dentro i limiti, quella di costo minimo. La parte dello scarto
+comune a tutte le celle non si può correggere: il bilanciatore sposta carica
+da una cella all'altra, non ne toglie al pacco.
+
+\subsubsection{$J_m$, massimizzazione della cella più bassa (eq.~9--10)}
+
+Il termine di bilanciamento è $-\sum_j \varepsilon_j$. Le $\varepsilon_j$
+compaiono solo al primo grado, con coefficiente $-1$: per la regola del
+passo~4 danno $f_{N+j} = -1$ e nessun contributo a $H$. Il minimo sulle celle
+è espresso dai vincoli $\varepsilon_j \le y^n_{k+j}$ per ogni $n$: minimizzare
+$-\sum_j \varepsilon_j$ spinge ogni $\varepsilon_j$ verso l'alto finché tocca
+la tensione della cella più bassa al passo $j$.
+
+\subsubsection{$J_\Delta$, minima differenza tra le celle (eq.~12--13)}
+
+Il termine di bilanciamento è $\sum_j \varepsilon_{p+j} - \sum_j
+\varepsilon_j$, ancora di primo grado: $f_{N+j} = -1$ e $f_{N+p+j} = +1$,
+nessun contributo a $H$. Ai vincoli di $J_m$ si aggiungono
+$\varepsilon_{p+j} \ge y^n_{k+j}$, che spingono ogni $\varepsilon_{p+j}$ verso
+il basso fino alla cella più alta.
+
+\subsection{Vincoli}\label{sec:vincoli}
 
 Sostituendo la predizione linearizzata, tutti i vincoli diventano lineari in
 $z$ (per ogni $j = 1,\dots,p$ e $n = 1,\dots,N$):
 \begin{align}
-  -D_{j,n}\,u^n - e &\le Y^0_{j,n} - y_{\min}
+  -D_{j,n}\,u^n_k - e &\le Y^\lib_{j,n} - y_{\min}
      && \text{tensione minima rilassata, eq.~(6e) e (17)} \\
-  \varepsilon_j - D_{j,n}\,u^n &\le Y^0_{j,n}
+  \varepsilon_j - D_{j,n}\,u^n_k &\le Y^\lib_{j,n}
      && \text{eq.~(10) e (13a), per } J_m \text{ e } J_\Delta \\
-  D_{j,n}\,u^n - \varepsilon_{p+j} &\le -Y^0_{j,n}
+  D_{j,n}\,u^n_k - \varepsilon_{p+j} &\le -Y^\lib_{j,n}
      && \text{eq.~(13b), per } J_\Delta \\
-  u_{\min} \le u^n &\le u_{\max}
+  u_{\min} \le u^n_k &\le u_{\max}
      && \text{eq.~(6d)} \\
   -e &\le 0 \\
-  \textstyle\sum_{n} u^n &= 0
+  \textstyle\sum_{n} u^n_k &= 0
      && \text{eq.~(6f)}
 \end{align}
 Se la grandezza bilanciata è il SOC anziché la tensione, nel costo e nei
@@ -1180,10 +1512,10 @@ $D$; il vincolo di tensione minima usa sempre $\bar Y$ e $D$.
 
 \subsection{Punto di partenza del solutore}
 
-Nel punto $u = \bar u$ la predizione linearizzata coincide con la traiettoria
+Nel punto $u_k = \bar u$ la predizione linearizzata coincide con la traiettoria
 di linearizzazione, quindi un punto ammissibile si scrive direttamente:
 \[
-  u = \bar u, \qquad
+  u_k = \bar u, \qquad
   \varepsilon_j = \min_n \bar Y_{j,n}, \qquad
   \varepsilon_{p+j} = \max_n \bar Y_{j,n}, \qquad
   e = \max\bigl(0,\; y_{\min} - \min_{j,n} \bar Y_{j,n}\bigr).
@@ -1195,8 +1527,9 @@ soluzione, l'uscita è questo punto: la mossa precedente viene mantenuta.
 
 \begin{enumerate}
   \item Si campionano $s_k$, $V_{p,k}$ di ogni cella e la corrente di pacco $i_k$.
-  \item \file{Cella_nominale}: si calcola il riferimento $r_1,\dots,r_p$
-        integrando una cella senza deviazioni dalla media degli stati.
+  \item \file{Cella_nominale}: si calcolano le tensioni della cella nominale,
+        $y^0_{k+1},\dots,y^0_{k+p}$, integrando una cella senza deviazioni
+        dalla media degli stati.
   \item \file{Predizione_linearizzata}: con la corrente $i_k + u^n_{k-1}$ si
         calcolano la traiettoria di linearizzazione $\bar Y$, $\bar S$, con le
         \eqref{eq:soc}--\eqref{eq:y}, e i coefficienti di sensibilità $D$ ed
@@ -1223,7 +1556,7 @@ quella di cui si occupa questa sezione.
 La linearizzazione introduce errore solo dove il modello non è lineare nella
 corrente:
 \begin{itemize}
-  \item il SOC è esattamente lineare in $u$, come mostra la \eqref{eq:alpha},
+  \item il SOC è esattamente lineare in $u_k$, come mostra la \eqref{eq:alpha},
         tranne quando una cella satura a 1;
   \item la tensione non lo è per i prodotti $R_o(s)\,I$ e $I/C_p(s)$, per
         $\tau(s)$ e per i cambi di pendenza delle tabelle quando il SOC
@@ -1244,7 +1577,7 @@ cambiato le durate.
 \begin{tabular}{llcccc}
 \toprule
  & & \multicolumn{2}{c}{Durata [s]} & Scarto massimo & Sforzo medio [A$^2$] \\
-Configurazione & Costo & \texttt{nlmpc} & QP & su $u$ [A] & \texttt{nlmpc} / QP \\
+Configurazione & Costo & \texttt{nlmpc} & QP & su $u_k$ [A] & \texttt{nlmpc} / QP \\
 \midrule
 $N=5$, $\Tc=1$ s, $p=5$   & $J_t$      & 2529 & 2529 & $3{,}7\cdot10^{-3}$ & 5,3526 / 5,3526 \\
 (orizzonte 5 s)           & $J_m$      & 2478 & 2478 & $9{,}3\cdot10^{-4}$ & 0,7825 / 0,7825 \\
@@ -1270,7 +1603,7 @@ sottosistema \file{Controllo}, e ogni blocco chiama una funzione:
 \toprule
 Passaggio & Blocco in \file{Controllo} & File \\
 \midrule
-Riferimento $r_j$ & \file{Cella_nominale} & \file{qp_cella_nominale.m} \\
+Cella nominale $y^0_{k+j}$ & \file{Cella_nominale} & \file{qp_cella_nominale.m} \\
 Predizione e derivate, sezione~\ref{sec:derdiscreto} & \file{Predizione_linearizzata} & \file{qp_predizione.m} \\
 Valore e derivata dei parametri, \eqref{eq:tabella} & --- & \file{qp_tabella.m} \\
 Matrici del QP e punto di partenza & \file{Problema_QP} & \file{qp_problema.m} \\
@@ -1288,8 +1621,8 @@ sono tre file che il modello non usa:
 \begin{itemize}
   \item \file{predizione_linearizzata_semplice.m} fa lo stesso calcolo una
         cella alla volta, con numeri singoli, ed è diviso nelle stesse parti di
-        questo documento (\file{cella_nominale_semplice.m} fa lo stesso per il
-        riferimento);
+        questo documento (\file{cella_nominale_semplice.m} fa lo stesso per la
+        cella nominale);
   \item \file{Predizione_linearizzata_blocchi.slx} fa lo stesso calcolo con
         blocchi Simulink, un sottosistema per ogni parte;
   \item \file{esempio_sensibilita_ode45.m} applica le formule generali della

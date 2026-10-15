@@ -6,6 +6,11 @@
 
 % Copyright 2012 The MathWorks, Inc.
 
+%% Bilanciamento (usati da Modello_semplificato.slx, come in 2_celle/init.m)
+Fs = 333; %Hz Frequenza di switching
+Capacity = .01; %Capacita della cella i-esima
+R_on = 1e-3; %Resistenza del mosfet quando è in conduzione
+
 %% Lookup Table Breakpoints
 
 SOC_LUT = [0 0.1 0.25 0.5 0.75 0.9 1]';

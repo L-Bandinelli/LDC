@@ -1,0 +1,590 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[margin=2.5cm]{geometry}
+
+\setcounter{secnumdepth}{1}
+
+\newcommand{\file}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\Tc}{T_c}
+\newcommand{\nom}{\mathrm{nom}}
+\newcommand{\lib}{\mathrm{lib}}
+\newcommand{\rif}{[L]}                      % Linearizzazione_MPC.pdf
+\newcommand{\rifq}{[Q]}                     % Problema_QP_MPC.pdf
+\newcommand{\ip}[1]{\textbf{(H#1)}}         % etichetta di un'ipotesi
+
+\title{Dal modello della cella al problema quadratico:\\passaggi e ipotesi}
+\author{MPC di bilanciamento attivo, modello \file{Bilanciamento_MPC.slx}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent
+Questo documento elenca, in ordine, i passaggi matematici che portano dal
+modello della cella al problema quadratico (QP) che l'MPC di bilanciamento
+risolve a ogni passo di controllo. Per ogni passaggio riporta la formula e le
+ipotesi su cui si regge. Dimostrazioni ed esempi numerici sono nei due
+documenti di riferimento:
+\begin{itemize}
+  \item {\rif} $=$ \file{Linearizzazione_MPC.pdf}: modello, linearizzazione,
+        costo $J_t$;
+  \item {\rifq} $=$ \file{Problema_QP_MPC.pdf}: costruzione delle matrici del
+        QP.
+\end{itemize}
+
+\paragraph{Come si legge.}
+\begin{itemize}
+  \item Le voci con il pallino sono \emph{passaggi}, e ciascuna dice se è
+        esatta o se introduce un'approssimazione. Le voci con l'etichetta
+        \ip{1}, \ip{2}, \dots\ sono \emph{ipotesi}; la
+        sezione~\ref{sec:riepilogo} le raccoglie in una tabella.
+  \item L'etichetta a destra di una formula dice dove si trova: [L,~(6)] è
+        l'equazione (6) di \rif; ``eq.~7'' è l'equazione 7 del paper di Chen,
+        Behal e Li (IEEE CDC 2021).
+  \item $n = 1,\dots,N$ è la cella, scritta come indice in alto; $k$ è
+        l'istante attuale; $j = 1,\dots,p$ il passo lungo l'orizzonte; $\Tc$
+        la durata di un passo. Le correnti sono positive in scarica.
+  \item La notazione è quella di \rif. {\rifq} usa ancora $Y^0_{j,n}$ per la
+        risposta libera, $r_j$ per la tensione della cella nominale e $u^n$
+        per $u^n_k$.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Modello della cella}\label{sec:modello}
+
+\begin{itemize}
+  \item[\ip{1}] \emph{Circuito equivalente.} Ogni cella è un generatore
+        $V_{oc}$ in serie a una resistenza $R_o$ e a un ramo formato da $R_p$
+        e $C_p$ in parallelo. Lo stato è $x = (s, V_p)$: stato di carica
+        (SOC) e tensione di polarizzazione. L'uscita è la tensione ai morsetti
+        $y$.
+  \item[\ip{2}] \emph{Parametri.} $V_{oc}$, $R_o$, $R_p$, $C_p$ dipendono solo
+        dal SOC: non dalla temperatura, né dal verso della corrente, né
+        dall'invecchiamento. Ciascuno è una tabella nominale su 7 punti di SOC
+        $\sigma_1 < \dots < \sigma_7$, interpolata linearmente. La cella $n$
+        differisce dalla nominale per un fattore moltiplicativo $f^n_P$ su
+        ogni parametro $P$ e per la capacità $C^n$. Per
+        $\sigma_i \le s < \sigma_{i+1}$:
+        \[
+          P^n(s) = f^n_P\,\bigl[P^{\nom}_i + m_i\,(s - \sigma_i)\bigr], \quad
+          (P^n)'(s) = f^n_P\, m_i, \quad
+          m_i = \frac{P^{\nom}_{i+1} - P^{\nom}_i}{\sigma_{i+1} - \sigma_i} .
+          \tag*{[L,~(T)]}
+        \]
+        Fuori dalla tabella si usa il valore dell'estremo, con derivata nulla.
+  \item[\ip{3}] \emph{Collegamento.} Le celle sono in serie e percorse dalla
+        corrente di pacco $i$; il bilanciatore aggiunge alla cella $n$ la
+        corrente $u^n$. La corrente della cella è
+        \[
+          I^n = i + u^n .
+          \tag*{eq.~3}
+        \]
+  \item \emph{Modello a tempo continuo}, da \ip{1}--\ip{3}: conteggio della
+        carica, bilancio di corrente del ramo RC, tensione ai morsetti.
+        \[
+        \begin{aligned}
+          \dot s(t) &= -\frac{\eta}{3600\,C^n}\, I^n(t) , \\
+          \dot V_p(t) &= -\frac{V_p(t)}{\tau\bigl(s(t)\bigr)}
+                          + \frac{I^n(t)}{C_p\bigl(s(t)\bigr)} ,
+                          \qquad \tau = R_p\,C_p , \\
+          y(t) &= V_{oc}\bigl(s(t)\bigr) - V_p(t) - R_o\bigl(s(t)\bigr)\, I^n(t) ,
+        \end{aligned}
+        \tag*{[L,~(C1)--(C3)]; eq.~1}
+        \]
+        con $\eta$ il rendimento coulombico (1 nel progetto) e $C^n$ la
+        capacità in Ah. Il modello non è lineare perché $\tau$, $C_p$,
+        $V_{oc}$ e $R_o$ dipendono da $s$.
+  \item[\ip{4}] \emph{Discretizzazione.} La corrente è costante su ogni
+        passo: nel passo $j$, cioè per $(j-1)\Tc \le t < j\Tc$, vale
+        $I^n(t) = I^n_{k+j-1}$. Le equazioni differenziali si integrano con il
+        metodo di Eulero in avanti, con il secondo membro valutato a inizio
+        passo.
+  \item \emph{Modello discreto}, per $j = 1, \dots, p$:
+        \[
+        \begin{aligned}
+          s_{k+j} &= \min\bigl(s_{k+j-1} - \kappa^n I^n_{k+j-1},\; 1\bigr) , \\
+          V_{p,k+j} &= V_{p,k+j-1} + \Tc\left(-\frac{V_{p,k+j-1}}{\tau(s_{k+j-1})}
+                      + \frac{I^n_{k+j-1}}{C_p(s_{k+j-1})}\right) , \\
+          y_{k+j} &= V_{oc}(s_{k+j}) - V_{p,k+j} - R_o(s_{k+j})\, I^n_{k+j} , \\
+          \kappa^n &= \frac{\eta\,\Tc}{3600\,C^n} .
+        \end{aligned}
+        \tag*{[L,~(2)--(5)]; eq.~2}
+        \]
+        Esatto per il SOC, il cui secondo membro è costante sul passo.
+        Approssimato per $V_p$: a ogni passo $V_p$ è moltiplicata per
+        $1 - \Tc/\tau$ invece che per $e^{-\Tc/\tau}$. Il modello discreto è
+        stabile se $\Tc < 2\tau$ e non oscilla se $\Tc < \tau$; nel progetto
+        $\Tc = 20$~s e $\tau$ è tra circa 30 e 106~s. Il minimo, che impedisce
+        a una cella piena di caricarsi oltre, non c'è nell'eq.~2a del paper.
+  \item[\ip{5}] \emph{Stato misurato.} All'istante $k$ sono noti lo stato
+        $(s^n_k, V^n_{p,k})$ di ogni cella e la corrente di pacco $i_k$: sono
+        le condizioni iniziali della predizione. Nel modello Simulink si
+        campionano dal modello del pacco; non c'è uno stimatore.
+  \item[\ip{6}] \emph{Parametri noti.} La predizione della cella $n$ usa i
+        parametri della cella $n$: i fattori $f^n_P$ e la capacità $C^n$ sono
+        noti al controllore.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{La corrente lungo l'orizzonte}\label{sec:orizzonte}
+
+\begin{itemize}
+  \item \emph{Caso generale.} Sia $u^n_{k+j\,|\,k}$ la corrente di
+        bilanciamento che all'istante $k$ si prevede di applicare alla cella
+        $n$ al passo $k+j$, e $i_{k+j\,|\,k}$ la corrente di pacco prevista
+        per lo stesso passo. Con $I^n_{k+j} = i_{k+j\,|\,k} + u^n_{k+j\,|\,k}$
+        nel modello discreto, la tensione predetta dipende da tutta la
+        sequenza:
+        \[
+          y^n_{k+j} = y^n_{k+j}\bigl(u^n_{k\,|\,k},\, u^n_{k+1\,|\,k},\, \dots,\,
+                      u^n_{k+j\,|\,k}\bigr) , \qquad j = 1, \dots, p .
+          \tag*{[L,~(U1)]}
+        \]
+  \item[\ip{7}] \emph{Corrente di bilanciamento costante sulla predizione.} Si
+        sceglie una sola corrente per cella, tenuta per tutto l'orizzonte:
+        \[
+          u^n_{k+j\,|\,k} = u^n_{k\,|\,k} =: u^n_k , \qquad j = 1, \dots, p .
+          \tag*{[L,~(U2)]; eq.~6b}
+        \]
+        Il paper la giustifica con la lentezza delle correnti di
+        bilanciamento.
+  \item[\ip{8}] \emph{Corrente di pacco costante sulla predizione.} Del carico
+        futuro non si ha un'anteprima:
+        \[
+          i_{k+j\,|\,k} = i_k , \qquad j = 1, \dots, p .
+          \tag*{[L,~(U2)]}
+        \]
+  \item \emph{Conseguenze} (esatte, date \ip{7} e \ip{8}). La corrente della
+        cella è la stessa a ogni passo, e la predizione è funzione di un solo
+        numero per cella:
+        \[
+          I^n_{k+j} = i_k + u^n_k =: I^n , \qquad
+          y^n_{k+j} = y^n_{k+j}(u^n_k) , \qquad
+          s^n_{k+j} = s^n_{k+j}(u^n_k) .
+          \tag*{[L,~(1), (U3)]}
+        \]
+        Le incognite passano da $N(p+1)$ a $N$. Inoltre, per \ip{1}--\ip{3},
+        il modello della cella $n$ contiene solo $I^n$: la predizione della
+        cella $n$ dipende solo da $u^n_k$, non dalle correnti delle altre
+        celle.
+  \item \emph{Orizzonte recedente.} Della soluzione si applica solo il primo
+        passo; all'istante $k+1$ il problema si risolve di nuovo con le nuove
+        misure, e in generale
+        $u^n_{k+1} = u^n_{k+1\,|\,k+1} \ne u^n_{k+1\,|\,k}$. \ip{7} e \ip{8}
+        riguardano quindi la predizione, non la corrente applicata al pacco,
+        che cambia da un passo all'altro.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Il problema di controllo}\label{sec:problema}
+
+\begin{itemize}
+  \item \emph{Grandezza bilanciata.} Il paper scrive i costi per una grandezza
+        $\sigma$, che può essere la tensione ($\sigma = y$) o il SOC
+        ($\sigma = s$). Qui si scrive $\sigma = y$; con $\sigma = s$ cambia
+        solo quanto detto alla fine della sezione~\ref{sec:vincoli}.
+  \item \emph{Problema di ottimo non lineare.} All'istante $k$, con
+        $u_k = (u^1_k, \dots, u^N_k)$ e per ogni $j = 1, \dots, p$ e
+        $n = 1, \dots, N$:
+        \begin{align*}
+          & \min_{u_k \in \mathbb{R}^N} \;\; J(u_k) \tag*{eq.~6a}\\
+          & \text{con il modello discreto, \ip{7}, \ip{8} e lo stato iniziale }
+            (s^n_k, V^n_{p,k}) , \tag*{eq.~6b--6c}\\
+          & u_{\min} \le u^n_k \le u_{\max} , \tag*{eq.~6d}\\
+          & y^n_{k+j}(u^n_k) \ge y_{\min} , \tag*{eq.~6e}\\
+          & \textstyle\sum_{n=1}^{N} u^n_k = 0 . \tag*{eq.~6f}
+        \end{align*}
+  \item[\ip{9}] \emph{Bilanciatore ideale.} Il bilanciatore sposta carica tra
+        le celle senza perdite e senza scambiarne con l'esterno, da cui la
+        somma nulla; le sue correnti sono limitate (nel progetto
+        $u_{\min} = -2$~A e $u_{\max} = 2$~A). Sotto $y_{\min}$ ($3{,}2$~V)
+        la cella cede, e con lei il pacco in serie.
+  \item \emph{I tre costi.}
+        \begin{align*}
+          J_t(u_k) &= \sum_{j=1}^{p}\sum_{n=1}^{N}
+                      \bigl(y^n_{k+j}(u^n_k) - y^0_{k+j}\bigr)^2
+                      + \rho \sum_{n=1}^{N} (u^n_k)^2 , \tag*{eq.~7}\\
+          J_m(u_k) &= -\sum_{j=1}^{p} \min_n\, y^n_{k+j}(u^n_k)
+                      + \rho \sum_{n=1}^{N} (u^n_k)^2 , \tag*{eq.~8}\\
+          J_\Delta(u_k) &= \sum_{j=1}^{p} \Bigl(\max_n\, y^n_{k+j}(u^n_k)
+                      - \min_n\, y^n_{k+j}(u^n_k)\Bigr)
+                      + \rho \sum_{n=1}^{N} (u^n_k)^2 . \tag*{eq.~11}
+        \end{align*}
+  \item[\ip{10}] \emph{Peso sulle correnti.} La matrice di peso del paper è
+        $R = \rho\, I_N$, con $\rho > 0$ uguale per tutte le celle e
+        proporzionale all'orizzonte: $\rho = r\, p / p_{\mathrm{rif}}$, dove
+        $r$ è \texttt{par.mpc.r}.
+  \item[\ip{11}] \emph{Cella nominale.} In $J_t$, $y^0_{k+j}$ è la tensione di
+        una cella con parametri e capacità nominali ($f_P = 1$), che parte
+        dalla media degli stati misurati e subisce la sola corrente di pacco:
+        \[
+          s^0_k = \frac1N \sum_{n=1}^{N} s^n_k , \qquad
+          V^0_{p,k} = \frac1N \sum_{n=1}^{N} V^n_{p,k} , \qquad
+          I^0 = i_k ,
+        \]
+        fatta avanzare con lo stesso modello discreto. Non dipende da $u_k$:
+        per il problema è un dato. Nell'eq.~7 il paper scrive
+        $\sigma^0_{k+1}$, da leggere $\sigma^0_{k+j}$.
+  \item \emph{Perché non è ancora un QP.} Per tre ragioni, ciascuna con il
+        suo rimedio: le tensioni predette non sono funzioni lineari di $u_k$
+        (sezione~\ref{sec:lin}); il vincolo eq.~6e può non avere soluzione
+        (sezione~\ref{sec:morbido}); il minimo e il massimo di $J_m$ e
+        $J_\Delta$ non sono derivabili (sezione~\ref{sec:costo}).
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Linearizzazione della predizione}\label{sec:lin}
+
+Le celle sono indipendenti nella predizione: dove non serve, l'indice $n$ è
+sottinteso.
+
+\begin{itemize}
+  \item[\ip{12}] \emph{Punto di linearizzazione} (Remark~3). Si linearizza
+        attorno alla mossa precedente, $\bar u^n = u^n_{k-1}$, supponendo che
+        la nuova soluzione $u_k$ ne resti vicina.
+  \item \emph{Traiettoria di linearizzazione} (esatta). Il modello discreto
+        con la corrente $I^n = i_k + \bar u^n$ dà
+        \[
+          \bar Y_{j,n} = y^n_{k+j}(\bar u^n) , \qquad
+          \bar S_{j,n} = s^n_{k+j}(\bar u^n) , \qquad j = 1, \dots, p .
+        \]
+  \item[\ip{13}] \emph{Derivabilità.} $y^n_{k+j}(\cdot)$ è derivabile in
+        $\bar u^n$. Non lo è solo se la traiettoria cade esattamente su un
+        punto della tabella o se il SOC satura a 1: lì si usa la derivata del
+        tratto a destra, come nella [L,~(T)], e per la cella satura
+        $\alpha = 0$.
+  \item \emph{Sviluppo al primo ordine} (approssimato, con un errore di
+        ordine $(u^n_k - \bar u^n)^2$):
+        \[
+        \begin{aligned}
+          y^n_{k+j}(u^n_k) &\simeq \bar Y_{j,n} + D_{j,n}\,(u^n_k - \bar u^n) , &
+          D_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} , \\
+          s^n_{k+j}(u^n_k) &\simeq \bar S_{j,n} + E_{j,n}\,(u^n_k - \bar u^n) , &
+          E_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} .
+        \end{aligned}
+        \tag*{[L,~(6)]}
+        \]
+  \item \emph{Derivare rispetto alla corrente di cella} (esatto). Poiché
+        $I^n = i_k + u^n_k$ e $i_k$ è fissata da \ip{8},
+        $\partial/\partial u^n_k = \partial/\partial I^n$. Si definiscono le
+        derivate parametriche dello stato
+        \[
+          \alpha_j = \frac{\partial s_{k+j}}{\partial I} , \qquad
+          \beta_j = \frac{\partial V_{p,k+j}}{\partial I} , \qquad
+          \alpha_0 = \beta_0 = 0 ,
+        \]
+        nulle all'inizio perché lo stato misurato \ip{5} non dipende dalla
+        corrente futura. Tutte le derivate si calcolano lungo la traiettoria
+        di linearizzazione, cioè con $I = i_k + \bar u^n$.
+  \item \emph{Derivata dell'equazione di $V_p$} (esatta). Per la regola della
+        funzione composta $\partial\tau/\partial I = \tau'\,\alpha_{j-1}$ e
+        $\partial C_p/\partial I = C_p'\,\alpha_{j-1}$, con
+        $\tau' = R_p'\,C_p + R_p\,C_p'$ e i parametri letti in $s_{k+j-1}$:
+        \[
+          \beta_j = \beta_{j-1} + \Tc\left(
+             -\frac{\beta_{j-1}}{\tau}
+             + \frac{V_{p,k+j-1}\,\tau'\,\alpha_{j-1}}{\tau^2}
+             + \frac{1}{C_p}
+             - \frac{I\,C_p'\,\alpha_{j-1}}{C_p^2}\right) .
+          \tag*{[L,~(7)]}
+        \]
+  \item \emph{Derivata dell'equazione del SOC} (esatta):
+        \[
+          \alpha_j =
+          \begin{cases}
+            \alpha_{j-1} - \kappa & \text{se } s_{k+j-1} - \kappa I < 1 , \\
+            0 & \text{se la cella satura a } s_{k+j} = 1 .
+          \end{cases}
+          \tag*{[L,~(8)]}
+        \]
+        Senza saturazione $\alpha_j = -j\,\kappa$: il SOC è esattamente lineare
+        in $u_k$, e la seconda riga della [L,~(6)] è un'uguaglianza.
+  \item \emph{Derivata dell'uscita} (esatta), con i parametri letti in
+        $s_{k+j}$:
+        \[
+          D_j = V_{oc}'\,\alpha_j - \beta_j - R_o'\,\alpha_j\, I - R_o ,
+          \qquad E_j = \alpha_j .
+          \tag*{[L,~(9)]}
+        \]
+        Sono le derivate esatte del modello discreto, e coincidono con Eulero
+        applicato alle equazioni di sensibilità a tempo continuo,
+        [L,~(C5)--(C8)]: la linearizzazione non aggiunge un secondo errore di
+        discretizzazione.
+  \item \emph{Risposta libera e risposta forzata} (riscrittura esatta della
+        [L,~(6)]):
+        \[
+          y^n_{k+j}(u^n_k) \simeq Y^\lib_{j,n} + D_{j,n}\,u^n_k , \qquad
+          Y^\lib_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n ,
+          \tag*{[L,~(10)]}
+        \]
+        e allo stesso modo $s^n_{k+j}(u^n_k) \simeq S^\lib_{j,n} + E_{j,n}\,u^n_k$,
+        con $S^\lib_{j,n} = \bar S_{j,n} - E_{j,n}\,\bar u^n$. $Y^\lib_{j,n}$ è
+        il valore della retta della cella $n$ in $u^n_k = 0$; non va confusa
+        con $y^0_{k+j}$, la tensione della cella nominale.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Incognite e forma del QP}\label{sec:forma}
+
+\begin{itemize}
+  \item \emph{Incognite.}
+        \[
+          z = \begin{bmatrix} u_k \\ \varepsilon \\ e \end{bmatrix} \in \mathbb{R}^{n_z},
+          \qquad n_z = N + n_\varepsilon + 1 ,
+        \]
+        con $u_k \in \mathbb{R}^N$ le correnti, $\varepsilon \in
+        \mathbb{R}^{n_\varepsilon}$ le variabili ausiliarie del costo
+        ($n_\varepsilon = 0$ per $J_t$, $p$ per $J_m$, $2p$ per $J_\Delta$;
+        sezione~\ref{sec:costo}) ed $e$ la variabile che allenta il vincolo di
+        tensione (sezione~\ref{sec:morbido}).
+  \item \emph{Forma di \texttt{quadprog}}:
+        \[
+          \min_{z} \;\; \tfrac12\, z^\top H z + f^\top z
+          \qquad \text{con} \qquad A z \le b , \quad A_{eq}\, z = b_{eq} .
+        \]
+  \item \emph{Regola di lettura} (esatta; {\rifq}, sezione~2.2). Se il costo
+        contiene $a\,z_i^2$, allora $H_{ii} = 2a$; se contiene $g\,z_i$,
+        allora $f_i = g$; le costanti si scartano, perché non spostano il
+        punto di minimo. Nei costi che seguono non compaiono prodotti
+        $z_i z_l$ con $i \ne l$, quindi $H$ è diagonale.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Vincolo di tensione morbido}\label{sec:morbido}
+
+\begin{itemize}
+  \item[\ip{14}] \emph{Vincolo morbido.} Il vincolo eq.~6e è allentato da
+        un'incognita $e \ge 0$, pagata nel costo con un peso $W \gg \rho$ (nel
+        progetto $W = 10^3$):
+        \[
+          y^n_{k+j}(u^n_k) + e \ge y_{\min} , \qquad e \ge 0 , \qquad
+          \text{costo} \;+\; W e^2 .
+          \tag*{eq.~17}
+        \]
+        Il problema ha così sempre punti ammissibili, e nella soluzione $e$
+        è la violazione peggiore della predizione:
+        \[
+          e = \max\Bigl(0,\; \max_{j,n}\, \bigl(y_{\min} - y^n_{k+j}\bigr)\Bigr) .
+        \]
+        Il vincolo morbido non è del tutto equivalente a quello rigido: quando una tensione si
+        fermerebbe esattamente a $y_{\min}$, si accetta una piccola violazione,
+        inversamente proporzionale a $W$. Nel modello $e$ è sempre presente;
+        il paper la introduce solo quando il problema rigido non ha soluzione.
+  \item \emph{Contributo al costo} (regola della sezione~\ref{sec:forma}):
+        $H_{ee} = 2W$, dove $H_{ee}$ è l'ultimo elemento della diagonale.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Il costo}\label{sec:costo}
+
+\begin{itemize}
+  \item \emph{Termine comune.} $\rho\, u_k^\top u_k = \rho \sum_n (u^n_k)^2$
+        dà $2\rho$ su ogni elemento $H_{nn}$ delle correnti, per tutti e tre i
+        costi.
+\end{itemize}
+
+\paragraph{$J_t$, inseguimento della cella nominale.}
+\begin{itemize}
+  \item \emph{Sostituire la retta} (approssimato, per la [L,~(10)]):
+        \[
+          y^n_{k+j} - y^0_{k+j} \simeq D_{j,n}\,u^n_k + c_{j,n} , \qquad
+          c_{j,n} = Y^\lib_{j,n} - y^0_{k+j} ,
+        \]
+        \[
+          J_t(u_k) \simeq \sum_{j=1}^{p}\sum_{n=1}^{N}
+                     \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2
+                     + \rho \sum_{n=1}^{N} (u^n_k)^2 .
+          \tag*{[L,~(Q1)]}
+        \]
+  \item \emph{Separare le celle} (esatto: si scambiano due somme finite):
+        \[
+          J_t(u_k) = \sum_{n=1}^{N} J^n(u^n_k) , \qquad
+          J^n(u^n_k) = \sum_{j=1}^{p} \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2
+                       + \rho\,(u^n_k)^2 .
+          \tag*{[L,~(Q2)]}
+        \]
+        Non ci sono prodotti misti $u^n_k u^m_k$: il blocco delle correnti in
+        $H$ è diagonale, e le celle sono accoppiate solo da
+        $\sum_n u^n_k = 0$.
+  \item \emph{Sviluppare il quadrato} (esatto; $D_j$, $c_j$ e $u$ stanno per
+        $D_{j,n}$, $c_{j,n}$ e $u^n_k$):
+        \[
+          J^n(u) = \Bigl(\sum_{j=1}^{p} D_j^2 + \rho\Bigr) u^2
+                 + \Bigl(2\sum_{j=1}^{p} D_j\,c_j\Bigr) u
+                 + \sum_{j=1}^{p} c_j^2 .
+          \tag*{[L,~(Q3)]}
+        \]
+        $y^0_{k+j}$ sta dentro $c_j$, quindi compare sia nel coefficiente di
+        $u$ sia nella costante: si scarta solo la costante.
+  \item \emph{Coefficienti del QP} (regola della sezione~\ref{sec:forma}):
+        \[
+          H_{nn} = 2\sum_{j=1}^{p} D_{j,n}^2 + 2\rho , \qquad
+          f_n = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^\lib_{j,n} - y^0_{k+j}\bigr) .
+          \tag*{[L,~(11)]}
+        \]
+\end{itemize}
+
+\paragraph{$J_m$, massimizzazione della cella più bassa.}
+\begin{itemize}
+  \item \emph{Riformulazione con minoranti} (esatta; eq.~9--10, Remark~2).
+        Per ogni passo si introduce un'incognita $\varepsilon_j$:
+        \[
+          \min_{u_k,\,\varepsilon,\,e} \; -\sum_{j=1}^{p} \varepsilon_j
+             + \rho\, u_k^\top u_k + W e^2
+          \qquad \text{con} \qquad
+          \varepsilon_j \le y^n_{k+j}(u^n_k) \quad \text{per ogni } j, n .
+        \]
+        Fissata $u_k$, il costo spinge $\varepsilon_j$ verso l'alto e i
+        vincoli lo fermano a $\min_n y^n_{k+j}$: le due scritture hanno la
+        stessa soluzione.
+  \item \emph{Coefficienti}: $f_{N+j} = -1$ e $H_{N+j,\,N+j} = 0$; per le
+        correnti $H_{nn} = 2\rho$ e $f_n = 0$.
+\end{itemize}
+
+\paragraph{$J_\Delta$, minima differenza tra le celle.}
+\begin{itemize}
+  \item \emph{Riformulazione con minoranti e maggioranti} (esatta;
+        eq.~12--13):
+        \[
+          \min_{u_k,\,\varepsilon,\,e} \; \sum_{j=1}^{p} \varepsilon_{p+j}
+             - \sum_{j=1}^{p} \varepsilon_j + \rho\, u_k^\top u_k + W e^2
+          \qquad \text{con} \qquad
+          \varepsilon_j \le y^n_{k+j}(u^n_k) \le \varepsilon_{p+j} .
+        \]
+        Nella soluzione $\varepsilon_j = \min_n y^n_{k+j}$ e
+        $\varepsilon_{p+j} = \max_n y^n_{k+j}$.
+  \item \emph{Coefficienti}: $f_{N+j} = -1$, $f_{N+p+j} = +1$ e zeri sulla
+        diagonale di $H$ nelle posizioni delle $\varepsilon$; per le correnti
+        $H_{nn} = 2\rho$ e $f_n = 0$.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Vincoli lineari}\label{sec:vincoli}
+
+\begin{itemize}
+  \item \emph{Sostituire la retta} (approssimato, per la [L,~(10)]) e portare
+        le incognite a sinistra. Per $j = 1, \dots, p$ e $n = 1, \dots, N$:
+        \begin{align*}
+          -D_{j,n}\,u^n_k - e &\le Y^\lib_{j,n} - y_{\min}
+             && \text{tensione minima} \tag*{[L,~(12)]}\\
+          \varepsilon_j - D_{j,n}\,u^n_k &\le Y^\lib_{j,n}
+             && \text{minoranti, } J_m \text{ e } J_\Delta \tag*{[L,~(13)]}\\
+          D_{j,n}\,u^n_k - \varepsilon_{p+j} &\le -Y^\lib_{j,n}
+             && \text{maggioranti, } J_\Delta \tag*{[L,~(14)]}\\
+          u_{\min} \le u^n_k &\le u_{\max}
+             && \text{limiti del bilanciatore} \tag*{[L,~(15)]}\\
+          -e &\le 0 \tag*{[L,~(16)]}\\
+          \textstyle\sum_{n=1}^{N} u^n_k &= 0
+             && \text{unico vincolo di uguaglianza} \tag*{[L,~(17)]}
+        \end{align*}
+        Sono le righe di $A z \le b$ e di $A_{eq}\, z = b_{eq}$; il vincolo
+        doppio sui limiti dà due righe per cella.
+  \item \emph{Se si bilancia il SOC} ($\sigma = s$). Nel costo e nei vincoli
+        sulle $\varepsilon$ si usano $S^\lib_{j,n}$, $E_{j,n}$ e $s^0_{k+j}$
+        al posto di $Y^\lib_{j,n}$, $D_{j,n}$ e $y^0_{k+j}$; il vincolo di
+        tensione minima usa sempre $Y^\lib_{j,n}$ e $D_{j,n}$.
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Il QP risolto a ogni passo}\label{sec:qp}
+
+\begin{itemize}
+  \item \emph{Problema finale.}
+        \[
+          \min_{z} \;\; \tfrac12\, z^\top H z + f^\top z
+          \qquad \text{con} \qquad A z \le b , \quad A_{eq}\, z = b_{eq} ,
+        \]
+        \[
+          H = \operatorname{diag}\bigl(H_{11}, \dots, H_{NN},\;
+              \underbrace{0, \dots, 0}_{n_\varepsilon},\; 2W\bigr) ,
+          \qquad
+          H_{nn} =
+          \begin{cases}
+            2\sum_j D_{j,n}^2 + 2\rho & \text{per } J_t , \\[2pt]
+            2\rho & \text{per } J_m \text{ e } J_\Delta .
+          \end{cases}
+        \]
+  \item \emph{Proprietà} (esatte; {\rifq}, sezione~10). $H$ è diagonale con
+        elementi non negativi, quindi il QP è convesso e ogni minimo locale è
+        globale. Per $J_t$ $H$ è definita positiva. Per tutti e tre i costi la
+        soluzione esiste ed è unica.
+  \item \emph{Punto di partenza.} In $u_k = \bar u$ la retta coincide con la
+        traiettoria di linearizzazione, e $\bar u = u_{k-1}$ rispetta già
+        limiti e somma nulla. Un punto ammissibile $z_0$ è quindi
+        \[
+          u_k = \bar u , \qquad
+          \varepsilon_j = \min_n \bar Y_{j,n} , \qquad
+          \varepsilon_{p+j} = \max_n \bar Y_{j,n} , \qquad
+          e = \max\bigl(0,\; y_{\min} - \min_{j,n} \bar Y_{j,n}\bigr) ,
+        \]
+        con le $\varepsilon$ solo dove il costo le prevede. \texttt{quadprog}
+        (algoritmo \texttt{active-set}) parte da $z_0$; se non trova una
+        soluzione restituisce $z_0$, cioè mantiene la mossa precedente.
+  \item \emph{Applicazione.} Al pacco si applicano per un passo le prime $N$
+        componenti della soluzione, $u_k$; $u_k$ diventa il punto di
+        linearizzazione $\bar u$ del passo successivo.
+  \item[\ip{15}] \emph{Una linearizzazione per passo.} Non si itera, cioè non
+        si linearizza di nuovo attorno alla soluzione per risolvere ancora: si
+        assume che $u_k$ sia abbastanza vicina a $\bar u$ perché la retta
+        basti. Con $\Tc = 20$~s e $p = 30$, tre linearizzazioni per passo non
+        hanno cambiato i risultati, e il QP dà le stesse durate del problema
+        non lineare ({\rif}, sezione~8).
+\end{itemize}
+
+% ---------------------------------------------------------------------------
+\section{Riepilogo delle ipotesi}\label{sec:riepilogo}
+
+\begin{center}
+\small
+\begin{tabular}{@{}l >{\raggedright\arraybackslash}p{6.4cm}
+                   >{\raggedright\arraybackslash}p{4.4cm} l@{}}
+\toprule
+ & Ipotesi & Dove interviene & Tipo \\
+\midrule
+H1  & Circuito equivalente con un ramo RC & modello continuo & modello \\
+H2  & Parametri funzione del solo SOC, lineari a tratti, con deviazioni
+      moltiplicative & tabelle; $\tau'$, $C_p'$, $V_{oc}'$, $R_o'$ & modello \\
+H3  & Celle in serie, $I^n = i + u^n$ & corrente di cella & modello \\
+H4  & Corrente costante sul passo, Eulero in avanti & modello discreto &
+      approssimazione \\
+H5  & Stato e corrente di pacco misurati in $k$ & condizioni iniziali;
+      \mbox{$\alpha_0 = \beta_0 = 0$} & misura \\
+H6  & Parametri di ogni cella noti al controllore & predizione di ogni cella
+      & modello \\
+H7  & $u^n_{k+j|k} = u^n_k$ & predizione; $N$ incognite & predizione \\
+H8  & $i_{k+j|k} = i_k$ & predizione; $\partial/\partial u^n_k =
+      \partial/\partial I^n$ & predizione \\
+H9  & Bilanciatore senza perdite e con correnti limitate &
+      $\sum_n u^n_k = 0$, limiti & modello \\
+H10 & $R = \rho\, I_N$ & $H_{nn}$ & progetto \\
+H11 & Cella nominale come riferimento & $c_{j,n}$ e $f_n$ di $J_t$ &
+      progetto \\
+H12 & $\bar u = u_{k-1}$ & $\bar Y$, $\bar S$, $D$, $E$, $z_0$ &
+      linearizzazione \\
+H13 & Predizione derivabile in $\bar u$ & $D$, $E$ & linearizzazione \\
+H14 & Vincolo di tensione morbido & $e$, $H_{ee}$, [L,~(12)] &
+      rilassamento \\
+H15 & Una linearizzazione per passo & ciclo di controllo &
+      linearizzazione \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Le ipotesi \ip{1}--\ip{11} definiscono il problema eq.~6 stesso: valgono
+allo stesso modo per il QP e per il problema non lineare risolto con
+\texttt{nlmpc}. Il QP se ne discosta solo per i passaggi approssimati delle
+sezioni~\ref{sec:lin}--\ref{sec:vincoli}, cioè lo sviluppo al primo ordine
+(ipotesi \ip{12}, \ip{13} e \ip{15}) e il vincolo morbido (ipotesi
+\ip{14}). Tutti gli altri
+passaggi dopo la sezione~\ref{sec:problema} sono esatti: separazione delle
+celle, sviluppo dei quadrati, scarto delle costanti, riformulazioni con le
+$\varepsilon$.
+
+\end{document}
