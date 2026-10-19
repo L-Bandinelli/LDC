@@ -24,8 +24,8 @@ linee(ax, ris.t, ris.s, st);
 ax = pannello(tl, st, 'Bilanciamento u^n [A]');
 linee(ax, ris.t, ris.u, st);
 
-ax = pannello(tl, st, 'Corrente di pacco i [A]');
-plot(ax, ris.t, ris.i, 'Color', st.assi, 'LineWidth', 1.2);
+ax = pannello(tl, st, 'Corrente di pacco i_{pacco} [A]');
+plot(ax, ris.t, ris.i_pacco, 'Color', st.assi, 'LineWidth', 1.2);
 
 ax = pannello(tl, st, 'F.e.m. del carico E [V]');
 plot(ax, ris.t, ris.E, 'Color', st.assi, 'LineWidth', 1.2);

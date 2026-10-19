@@ -1,0 +1,7 @@
+# File generati da Simulink a ogni simulazione
+slprj/
+*.slxc
+*.autosave
+
+# Copie di sicurezza del modello fatte prima di un riordino
+*_copia_*.slx

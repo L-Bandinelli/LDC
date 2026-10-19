@@ -2,7 +2,8 @@ function fig = grafico_confronto(risultati, par, titolo, finestra)
 %GRAFICO_CONFRONTO  Controllori a confronto (stile Fig. 3 e Fig. 5 del paper).
 %
 % risultati e' un cell array di uscite di simula_pacco. Pannelli: tensione
-% della cella piu' bassa e sforzo di bilanciamento e_k = u_k'*u_k.
+% della cella piu' bassa e sforzo di bilanciamento w_k = u_k'*u_k, la somma dei
+% quadrati delle correnti di bilanciamento al passo k.
 % finestra = [t1 t2] limita l'asse dei tempi (facoltativo).
 
 st  = stile_grafici();
@@ -11,7 +12,7 @@ tl  = tiledlayout(fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
 title(tl, titolo, 'FontWeight', 'bold');
 
 ax1 = pannello(tl, st, 'Tensione minima min_n y^n [V]');
-ax2 = pannello(tl, st, 'Sforzo e [A^2]');
+ax2 = pannello(tl, st, 'Sforzo w_k = u_k^T u_k [A^2]');
 xlabel(ax2, 'Tempo [s]');
 
 nomi = cell(1, numel(risultati));
@@ -21,7 +22,7 @@ for c = 1:numel(risultati)
     nomi{c} = st.nome.(ris.tipo);
     plot(ax1, ris.t, min(ris.y, [], 2), 'Color', colore, 'LineWidth', 1.2);
     if ~strcmp(ris.tipo, 'nessuno')
-        plot(ax2, ris.t, ris.sforzo, 'Color', colore, 'LineWidth', 1.2);
+        plot(ax2, ris.t, ris.w, 'Color', colore, 'LineWidth', 1.2);
     end
 end
 yline(ax1, par.mpc.y_min, '--', 'y_{min}', 'Color', st.limite, ...

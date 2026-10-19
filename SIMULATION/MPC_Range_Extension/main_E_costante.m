@@ -21,11 +21,11 @@ end
 
 %% Tabella (stile Tabella I)
 fprintf('\nScenario A - E = %g V costante, p = %d\n', scen.E, p);
-fprintf('%-20s %10s %11s %14s  %s\n', 'Controllo', 'Durata [s]', 'Estensione', 'Sforzo [A^2]', 'Arresto');
+fprintf('%-20s %10s %11s %20s  %s\n', 'Controllo', 'Durata [s]', 'Estensione', 'Sforzo medio w [A^2]', 'Arresto');
 for c = 1:numel(tipi)
     est = 100 * (ris{c}.durata / ris{1}.durata - 1);
-    fprintf('%-20s %10.0f %10.2f%% %14.2f  %s\n', tipi{c}, ris{c}.durata, est, ...
-        ris{c}.sforzo_medio, ris{c}.motivo);
+    fprintf('%-20s %10.0f %10.2f%% %20.2f  %s\n', tipi{c}, ris{c}.durata, est, ...
+        ris{c}.w_medio, ris{c}.motivo);
 end
 
 %% Figure
@@ -39,7 +39,7 @@ fig = grafico_confronto(ris, par, 'Scenario A: tensione minima e sforzo di bilan
 exportgraphics(fig, fullfile(uscita, 'A_confronto.png'), 'Resolution', 150);
 
 fig = grafico_confronto(ris, par, 'Scenario A: ultimi 300 s', ...
-    [ris{1}.durata - 150, max(cellfun(@(r) r.durata, ris))]);
+    [ris{1}.durata - 150, max(cellfun(@(result) result.durata, ris))]);
 exportgraphics(fig, fullfile(uscita, 'A_confronto_finale.png'), 'Resolution', 150);
 
 save(fullfile(uscita, 'A_risultati.mat'), 'ris', 'par', 'pacco');

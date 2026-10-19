@@ -14,6 +14,7 @@
 \newcommand{\Tc}{T_c}
 \newcommand{\nom}{\mathrm{nom}}
 \newcommand{\lib}{\mathrm{lib}}
+\newcommand{\stab}{s^{\mathrm{tab}}}        % punti di SOC delle tabelle
 
 \title{Linearizzazione della predizione\\nell'MPC di bilanciamento attivo}
 \author{Modello Simulink \file{Bilanciamento_MPC.slx}}
@@ -92,7 +93,7 @@ seguenti.
         \eqref{eq:u-costante} nella sezione~\ref{sec:qp}). La corrente scelta
         al passo precedente è $u^n_{k-1}$.
   \item \emph{Derivate.} Il punto indica la derivata rispetto al tempo,
-        $\dot x = dx/dt$; l'apice la derivata rispetto al SOC,
+        $\dot V_p = dV_p/dt$; l'apice la derivata rispetto al SOC,
         $\tau' = d\tau/ds$.
   \item \emph{Barra.} Una grandezza con la barra, come $\bar u$ o $\bar Y$, è
         calcolata nel punto di linearizzazione (sezione~\ref{sec:punto}).
@@ -103,7 +104,8 @@ seguenti.
 
 Sia $k$ l'istante attuale, $\Tc$ il passo di controllo e $p$ l'orizzonte, cioè
 il numero di passi su cui si predice. Per la cella $n$ lo stato è la coppia
-$(s, V_p)$: stato di carica (SOC) e tensione di polarizzazione. La corrente
+$\zeta = (s, V_p)$, come nel paper: stato di carica (SOC) e tensione di
+polarizzazione. La corrente
 della cella è la somma della corrente di pacco e di quella di bilanciamento
 (eq.~3),
 \begin{equation}
@@ -156,10 +158,10 @@ $V_p(0) = V_{p,k}$, lo stato misurato.
   \item La \eqref{eq:c-y} è la tensione ai morsetti: quella a vuoto meno le
         cadute sul ramo RC e sulla resistenza serie.
 \end{itemize}
-In forma compatta, raccogliendo lo stato in $x = (s, V_p)$:
+In forma compatta, raccogliendo lo stato in $\zeta = (s, V_p)$:
 \begin{equation}
-  \dot x(t) = f\bigl(x(t),\, I^n\bigr), \qquad
-  y(t) = g\bigl(x(t),\, I^n\bigr), \qquad x(0) = x_k ,
+  \dot \zeta(t) = f\bigl(\zeta(t),\, I^n\bigr), \qquad
+  y(t) = g\bigl(\zeta(t),\, I^n\bigr), \qquad \zeta(0) = \zeta_k ,
   \tag{C4}\label{eq:c-compatta}
 \end{equation}
 dove $f$ ha per componenti i secondi membri della \eqref{eq:c-soc} e della
@@ -175,21 +177,21 @@ parametro in 7 punti di SOC (nel progetto 0; 0,1; 0,25; 0,5; 0,75; 0,9; 1).
 Tra un punto e l'altro si interpola linearmente. Le celle vere però non sono
 identiche: ognuna ha, per ogni parametro, un \emph{fattore di deviazione} che
 moltiplica la tabella nominale. Per esempio la resistenza serie della cella
-$n$ è $R_o^n(s) = f^n_{R_o}\,R_o^{\nom}(s)$.
+$n$ è $R_o^n(s) = \varphi^n_{R_o}\,R_o^{\nom}(s)$.
 
-In formule, sia $P$ uno dei quattro parametri, $\sigma_1 < \dots < \sigma_7$ i
+In formule, sia $P$ uno dei quattro parametri, $\stab_1 < \dots < \stab_7$ i
 punti di SOC della tabella e $P^{\nom}_1, \dots, P^{\nom}_7$ i valori nominali
-corrispondenti. Se $s$ cade nel tratto $i$, cioè
-$\sigma_i \le s < \sigma_{i+1}$, valore e derivata del parametro sono
+corrispondenti. Se $s$ cade nel tratto $\ell$, cioè
+$\stab_\ell \le s < \stab_{\ell+1}$, valore e derivata del parametro sono
 \begin{equation}
-  P(s) = f_P\,\bigl[P^{\nom}_i + m_i\,(s - \sigma_i)\bigr],
+  P(s) = \varphi_P\,\bigl[P^{\nom}_\ell + m_\ell\,(s - \stab_\ell)\bigr],
   \qquad
-  P'(s) = f_P\, m_i ,
+  P'(s) = \varphi_P\, m_\ell ,
   \qquad
-  m_i = \frac{P^{\nom}_{i+1} - P^{\nom}_i}{\sigma_{i+1} - \sigma_i} ,
+  m_\ell = \frac{P^{\nom}_{\ell+1} - P^{\nom}_\ell}{\stab_{\ell+1} - \stab_\ell} ,
   \tag{T}\label{eq:tabella}
 \end{equation}
-dove $m_i$ è la pendenza del tratto $i$ della tabella nominale. Ne seguono tre
+dove $m_\ell$ è la pendenza del tratto $\ell$ della tabella nominale. Ne seguono tre
 fatti, che serviranno nel calcolo delle derivate.
 \begin{itemize}
   \item Ogni parametro è una funzione \emph{lineare a tratti} del SOC: su
@@ -199,11 +201,11 @@ fatti, che serviranno nel calcolo delle derivate.
         quando $s$ passa da un tratto all'altro.
   \item Nei casi limite si procede così. Un punto della tabella, dove la
         funzione fa uno spigolo, è assegnato al tratto alla sua destra, come
-        dice la condizione $\sigma_i \le s < \sigma_{i+1}$; l'ultimo punto
+        dice la condizione $\stab_\ell \le s < \stab_{\ell+1}$; l'ultimo punto
         all'ultimo tratto. Fuori dalla tabella si usa il valore dell'estremo,
         con derivata nulla.
 \end{itemize}
-Per esempio, per la resistenza $R_p$ di una cella nominale ($f_{R_p} = 1$) in
+Per esempio, per la resistenza $R_p$ di una cella nominale ($\varphi_{R_p} = 1$) in
 $s = 0{,}6$: il punto cade nel tratto tra $0{,}5$ e $0{,}75$, ai cui estremi
 la tabella vale $0{,}0016~\Omega$ e $0{,}0023~\Omega$. Quindi
 \begin{align*}
@@ -230,9 +232,9 @@ differenziali a una regola che fa avanzare lo stato di un passo alla volta. Con
 il metodo di Eulero in avanti la derivata è sostituita dal rapporto
 incrementale su un passo,
 \[
-  \dot x \;\simeq\; \frac{x_{k+j} - x_{k+j-1}}{\Tc}
+  \dot \zeta \;\simeq\; \frac{\zeta_{k+j} - \zeta_{k+j-1}}{\Tc}
   \qquad\Longrightarrow\qquad
-  x_{k+j} = x_{k+j-1} + \Tc\, f\bigl(x_{k+j-1},\, I^n\bigr) ,
+  \zeta_{k+j} = \zeta_{k+j-1} + \Tc\, f\bigl(\zeta_{k+j-1},\, I^n\bigr) ,
 \]
 con il secondo membro valutato nello stato di \emph{inizio} passo: lo stato
 avanza come se la sua derivata restasse, per tutto il passo, quella che ha
@@ -327,12 +329,12 @@ passo $j$ basta quindi lo sviluppo al primo ordine di una funzione di una sola
 variabile, attorno a $\bar u^n$:
 \begin{equation}
 \begin{aligned}
-  y^n_{k+j}(u^n_k) &\;\simeq\; \bar Y_{j,n} + D_{j,n}\,\bigl(u^n_k - \bar u^n\bigr),
+  y^n_{k+j}(u^n_k) &\;\simeq\; \bar Y_{j,n} + d_{j,n}\,\bigl(u^n_k - \bar u^n\bigr),
   &\qquad
-  D_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} , \\[6pt]
-  s^n_{k+j}(u^n_k) &\;\simeq\; \bar S_{j,n} + E_{j,n}\,\bigl(u^n_k - \bar u^n\bigr),
+  d_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} , \\[6pt]
+  s^n_{k+j}(u^n_k) &\;\simeq\; \bar S_{j,n} + \alpha_{j,n}\,\bigl(u^n_k - \bar u^n\bigr),
   &\qquad
-  E_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} .
+  \alpha_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} .
 \end{aligned}
 \label{eq:lin}
 \end{equation}
@@ -341,19 +343,21 @@ cui si guarda la cella, $k$ quello in cui si sceglie la corrente. La stessa
 $u^n_k$ agisce su tutti i passi dell'orizzonte, quindi la tensione e il SOC a
 ogni passo $j$ sono funzioni di questo solo numero.
 I termini noti $\bar Y$ e $\bar S$ sono la traiettoria di linearizzazione
-della sezione~\ref{sec:punto}. $D_{j,n}$ ed $E_{j,n}$ sono i \emph{coefficienti
+della sezione~\ref{sec:punto}. $d_{j,n}$ e $\alpha_{j,n}$ sono i \emph{coefficienti
 di sensibilità} della predizione: dicono di quanto cambiano, tra $j$ passi, la
 tensione e il SOC della cella $n$ per ogni ampere in più di corrente di
-bilanciamento. Per ogni $j$ e $n$ la prima riga della \eqref{eq:lin} è la
+bilanciamento. Si scrivono in minuscolo come la loro versione a tempo
+continuo, $d(t)$ e $\alpha(t)$, che compare nella sezione~\ref{sec:derivate}.
+Per ogni $j$ e $n$ la prima riga della \eqref{eq:lin} è la
 retta tangente, nel punto $\bar u^n$, alla curva vera $y^n_{k+j}(u^n_k)$:
 coincide con essa in $\bar u^n$ e se ne allontana man mano che $u^n_k$ si
 scosta da $\bar u^n$.
 
 Poiché ogni cella dipende solo dalla propria corrente, bastano quattro matrici
-$p\times N$ (nel codice \texttt{Y}, \texttt{S}, \texttt{dY}, \texttt{dS})
+$p\times N$ (nel codice \file{Y_bar}, \file{S_bar}, \texttt{d}, \texttt{alfa})
 invece di una jacobiana $pN \times N$.
 
-Se il modello fosse lineare, $D$ ed $E$ sarebbero numeri fissi, calcolabili una
+Se il modello fosse lineare, $d$ e $\alpha$ sarebbero numeri fissi, calcolabili una
 volta per tutte, e la \eqref{eq:lin} sarebbe un'uguaglianza. Con il modello non
 lineare dipendono invece dal punto di linearizzazione: vanno ricalcolati a ogni
 passo di controllo, e la \eqref{eq:lin} è un'approssimazione, buona finché
@@ -361,11 +365,11 @@ $u_k$ resta vicina a $\bar u$.
 
 A questo punto $\bar Y$ e $\bar S$ si ottengono facendo avanzare il modello
 \eqref{eq:soc}--\eqref{eq:y} con la corrente $i_k + \bar u^n$. Restano da
-calcolare $D$ ed $E$: è l'argomento della prossima sezione.
+calcolare $d$ e $\alpha$: è l'argomento della prossima sezione.
 
 \section{Calcolo delle derivate}\label{sec:derivate}
 
-Questa sezione calcola i coefficienti di sensibilità $D_{j,n}$ ed $E_{j,n}$
+Questa sezione calcola i coefficienti di sensibilità $d_{j,n}$ e $\alpha_{j,n}$
 della \eqref{eq:lin}. Conviene ricordare che cosa sono: le derivate parziali
 della tensione e del SOC predetti, all'istante $k+j$, rispetto alla corrente
 di bilanciamento della stessa cella, valutate nel punto di linearizzazione.
@@ -407,28 +411,35 @@ tempi:
 \subsubsection{Le derivate parametriche dello stato}
 
 Con la corrente $I$ costante, la soluzione della \eqref{eq:c-compatta} è una
-funzione del tempo e del valore scelto per la corrente: $x(t;\, I)$. Le
+funzione del tempo e del valore scelto per la corrente: $\zeta(t;\, I)$. Le
 derivate parametriche dello stato sono
 \[
   \alpha(t) = \frac{\partial s(t;\, I)}{\partial I}, \qquad
   \beta(t)  = \frac{\partial V_p(t;\, I)}{\partial I} .
 \]
 Dicono di quanto si sposta lo stato all'istante $t$ se la corrente, costante su
-tutto l'orizzonte, aumenta di un ampere. Nel seguito sono usate così:
+tutto l'orizzonte, aumenta di un ampere. Insieme alla derivata della
+tensione ai morsetti, $d$, che si ricava da esse, sono i tre
+\emph{coefficienti di sensibilità} della cella: $\alpha$ del SOC, $\beta$
+della tensione di polarizzazione, $d$ della tensione ai morsetti. Tutti e tre
+sono derivate parametriche rispetto alla corrente. Nel seguito sono usati
+così:
 \begin{itemize}
-  \item $\alpha$ è già uno dei due coefficienti cercati: negli istanti di
-        campionamento è la derivata del SOC, cioè $E$ (\texttt{dS} nel codice);
-  \item $\alpha$ e $\beta$ insieme danno la derivata della tensione, cioè $D$
-        (\texttt{dY} nel codice): con la \eqref{eq:c-dy} a tempo continuo e
+  \item $\alpha$ è già uno dei due coefficienti che entrano nella
+        \eqref{eq:lin}: negli istanti di campionamento è $\alpha_{j,n}$, la
+        derivata del SOC (\texttt{alfa} nel codice);
+  \item $\alpha$ e $\beta$ insieme danno la derivata della tensione, cioè $d$
+        (\texttt{d} nel codice): con la \eqref{eq:c-dy} a tempo continuo e
         con la \eqref{eq:D} a tempo discreto;
   \item $\alpha$ serve anche a calcolare $\beta$, perché i parametri del ramo
         RC dipendono dal SOC: compare nella \eqref{eq:c-beta} e nella
         \eqref{eq:beta};
-  \item $D$ ed $E$ entrano infine nel costo e nei vincoli del QP
+  \item $d$ e $\alpha$ entrano infine nel costo e nei vincoli del QP
         (sezione~\ref{sec:qp}).
 \end{itemize}
 $\beta$ non esce quindi dal calcolo della predizione: è un passaggio intermedio
-verso $D$. Nel codice $\alpha$ e $\beta$ sono \texttt{alfa} e \texttt{beta}.
+verso $d$. Nel codice, al passo $j$, $\alpha_j$, $\beta_j$ e $d_j$ sono
+\file{alfa_j}, \file{beta_j} e \file{d_j}.
 
 Va tenuto presente che $\alpha$ e $\beta$ non sono derivate rispetto al tempo.
 Sono a loro volta funzioni del tempo: partono da zero e cambiano lungo
@@ -482,15 +493,15 @@ integrato con \texttt{ode45}, è in \file{esempio_sensibilita_ode45.m}.
 
 \subsubsection{Applicazione alla cella}
 
-Per la cella il parametro è uno solo, $\theta = I$; lo stato è $x = (s, V_p)$,
-quindi $\partial x/\partial I = (\alpha, \beta)$; la condizione iniziale $x_k$
+Per la cella il parametro è uno solo, $\theta = I$; lo stato è $\zeta = (s, V_p)$,
+quindi $\partial \zeta/\partial I = (\alpha, \beta)$; la condizione iniziale $\zeta_k$
 è misurata, quindi non dipende da $I$. L'espressione generale diventa
 \begin{equation}
-  \frac{d}{dt}\,\frac{\partial x}{\partial I}
-    = \underbrace{\frac{\partial f}{\partial x}\,
-                  \frac{\partial x}{\partial I}}_{I \text{ tramite lo stato}}
+  \frac{d}{dt}\,\frac{\partial \zeta}{\partial I}
+    = \underbrace{\frac{\partial f}{\partial \zeta}\,
+                  \frac{\partial \zeta}{\partial I}}_{I \text{ tramite lo stato}}
     \;+\; \underbrace{\frac{\partial f}{\partial I}}_{I \text{ diretta}} ,
-  \qquad \frac{\partial x}{\partial I}(0) = 0 .
+  \qquad \frac{\partial \zeta}{\partial I}(0) = 0 .
   \tag{C5}\label{eq:c-sens}
 \end{equation}
 La condizione iniziale è nulla perché lo stato misurato non dipende dalla
@@ -536,7 +547,7 @@ seconda di $\beta$. Restano da calcolare le sei derivate parziali.
 \end{itemize}
 In forma di matrici:
 \[
-  \frac{\partial f}{\partial x} =
+  \frac{\partial f}{\partial \zeta} =
   \begin{bmatrix}
     0 & 0 \\[4pt]
     \dfrac{V_p\,\tau'}{\tau^2} - \dfrac{I\,C_p'}{C_p^2} & -\dfrac{1}{\tau}
@@ -696,8 +707,8 @@ così una grandezza discreta, con lo stesso significato:
 \midrule
 Stato & $\bar s(t_j)$, $\bar V_p(t_j)$ & $s_{k+j}$, $V_{p,k+j}$ & \texttt{s}, \texttt{Vp} \\
 Uscita & $\bar y(t_j)$ & $y_{k+j}$ & \texttt{y} \\
-Derivate parametriche dello stato & $\alpha(t_j)$, $\beta(t_j)$ & $\alpha_j$, $\beta_j$ & \texttt{alfa}, \texttt{beta} \\
-Coefficienti di sensibilità & $d(t_j)$, $\alpha(t_j)$ & $D_j$, $E_j$ & \texttt{D}, \texttt{E} \\
+Sensibilità di $s$ e $V_p$ & $\alpha(t_j)$, $\beta(t_j)$ & $\alpha_j$, $\beta_j$ & \file{alfa_j}, \file{beta_j} \\
+Sensibilità di $y$ & $d(t_j)$ & $d_j$ & \file{d_j} \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -707,8 +718,9 @@ Le grandezze discrete non sono i valori esatti di quelle continue negli istanti
 $t_j$, ma la loro approssimazione con il metodo di Eulero; solo per il SOC e
 per $\alpha$ le due coincidono. Raccolte per tutti i passi e per tutte le
 celle, $y_{k+j}$ e $s_{k+j}$ formano le matrici $\bar Y$ e $\bar S$ della
-sezione~\ref{sec:punto} (nel codice \texttt{Y} e \texttt{S}), $D_j$ ed $E_j$
-le matrici $D$ ed $E$ della \eqref{eq:lin} (\texttt{dY} e \texttt{dS}).
+sezione~\ref{sec:punto} (nel codice \file{Y_bar} e \file{S_bar}), $d_j$ e
+$\alpha_j$ i coefficienti $d_{j,n}$ e $\alpha_{j,n}$ della \eqref{eq:lin}
+(matrici \texttt{d} e \texttt{alfa}).
 
 \subsubsection{Due strade equivalenti}
 
@@ -722,20 +734,20 @@ strade:
         \eqref{eq:soc}--\eqref{eq:y}.
 \end{enumerate}
 La regola di Eulero è quella della sezione~\ref{sec:discreto}: una grandezza
-$z(t)$ avanza di un passo come se la sua derivata, calcolata all'\emph{inizio}
+$\xi(t)$ avanza di un passo come se la sua derivata, calcolata all'\emph{inizio}
 del passo, restasse costante per tutta la durata del passo,
 \[
-  z_j = z_{j-1} + \Tc\; \dot z\,\big|_{t_{j-1}} .
+  \xi_j = \xi_{j-1} + \Tc\; \dot \xi\,\big|_{t_{j-1}} .
 \]
 Con Eulero in avanti le due strade portano alle stesse formule. Derivando un
 passo del modello discreto si ottiene infatti
 \[
-  x_{k+j} = x_{k+j-1} + \Tc\, f(x_{k+j-1}, I)
+  \zeta_{k+j} = \zeta_{k+j-1} + \Tc\, f(\zeta_{k+j-1}, I)
   \quad\Longrightarrow\quad
-  \frac{\partial x_{k+j}}{\partial I}
-    = \frac{\partial x_{k+j-1}}{\partial I}
-      + \Tc\left(\frac{\partial f}{\partial x}\,
-                 \frac{\partial x_{k+j-1}}{\partial I}
+  \frac{\partial \zeta_{k+j}}{\partial I}
+    = \frac{\partial \zeta_{k+j-1}}{\partial I}
+      + \Tc\left(\frac{\partial f}{\partial \zeta}\,
+                 \frac{\partial \zeta_{k+j-1}}{\partial I}
                  + \frac{\partial f}{\partial I}\right),
 \]
 che è proprio un passo di Eulero sulla \eqref{eq:c-sens}.
@@ -835,7 +847,8 @@ attraverso $\tau$, in modo diretto e attraverso $C_p$. Nel codice è
 l'istruzione
 {\small
 \begin{verbatim}
-    beta = beta + Tc*( -beta/tau + Vp*dtau*alfa/tau^2 + 1/Cp - I*dCp*alfa/Cp^2 );
+    beta_j = beta_j + Tc*( -beta_j/tau + Vp*ds_tau*alfa_j/tau^2 ...
+                           + 1/Cp - I_cella*ds_Cp*alfa_j/Cp^2 );
 \end{verbatim}
 }
 \noindent
@@ -912,9 +925,10 @@ discreto, che il SOC è esattamente lineare nella corrente.
 
 \subsubsection{Tensione ai morsetti}
 
-Si cercano i due coefficienti di sensibilità del passo $j$. Quello del SOC è
-immediato: per definizione $E_j = \alpha_j$. Per quello della tensione, $D_j$,
-il punto di partenza è l'equazione dell'uscita, la \eqref{eq:y}:
+Si cercano i due coefficienti di sensibilità del passo $j$ che entrano nella
+\eqref{eq:lin}. Quello del SOC è $\alpha_j$, appena calcolato con la
+\eqref{eq:alpha}. Per quello della tensione, $d_j$, il punto di partenza è
+l'equazione dell'uscita, la \eqref{eq:y}:
 \[
   y_{k+j} = V_{oc}(s_{k+j}) - V_{p,k+j} - R_o(s_{k+j})\, I .
 \]
@@ -938,18 +952,22 @@ Gli ultimi due vengono dalla derivata del prodotto $R_o\,I$, che è
 $R_o'\,\alpha_j\,I + R_o$. Sommando:
 \begin{equation}
 \begin{aligned}
-  D_j &= \frac{\partial y_{k+j}}{\partial I}
+  d_j &= \frac{\partial y_{k+j}}{\partial I}
       = \underbrace{V_{oc}'\,\alpha_j}_{V_{oc} \text{ tramite il SOC}}
         \;-\; \underbrace{\beta_j}_{V_p \text{ dipende da } I}
         \;-\; \underbrace{R_o'\,\alpha_j\,I}_{R_o \text{ tramite il SOC}}
-        \;-\; \underbrace{R_o}_{I \text{ diretta}} , \\[4pt]
-  E_j &= \alpha_j .
+        \;-\; \underbrace{R_o}_{I \text{ diretta}} .
 \end{aligned}
 \label{eq:D}
 \end{equation}
-Nel codice è l'istruzione \texttt{D = dVoc*alfa - beta - dRo*alfa*I - Ro}.
-L'uscita
-non ha una dinamica propria, quindi qui non c'è nulla da discretizzare: la
+Nel codice è l'istruzione
+{\small
+\begin{verbatim}
+    d_j = ds_Voc*alfa_j - beta_j - ds_Ro*alfa_j*I_cella - Ro;
+\end{verbatim}
+}
+\noindent
+L'uscita non ha una dinamica propria, quindi qui non c'è nulla da discretizzare: la
 \eqref{eq:D} è la \eqref{eq:c-dy} calcolata nello stato di fine passo, ed è il
 valore discreto di $d(t_j)$. I numeri si ottengono come prima: $\alpha_j$ e
 $\beta_j$ sono appena stati aggiornati, mentre $V_{oc}$, $R_o$ e le loro
@@ -971,8 +989,9 @@ così:
         \eqref{eq:alpha};
   \item si leggono allo stesso modo $V_{oc}$, $R_o$ e le loro derivate nel
         nuovo SOC, $s_{k+j}$;
-  \item si calcolano $y_{k+j}$ con la \eqref{eq:y} e $D_j$, $E_j$ con la
-        \eqref{eq:D}, e si scrivono nella riga $j$ delle quattro matrici.
+  \item si calcolano $y_{k+j}$ con la \eqref{eq:y} e $d_j$ con la
+        \eqref{eq:D}; $y_{k+j}$, $s_{k+j}$, $d_j$ e $\alpha_j$ si scrivono
+        nella riga $j$ delle quattro matrici.
 \end{enumerate}
 L'ordine non è arbitrario. Nel codice ogni grandezza occupa una sola
 variabile, che a ogni passo viene sovrascritta: prima dell'aggiornamento
@@ -1083,8 +1102,8 @@ $-\beta_j$ \quad ($V_p$ dipende da $I$) & $-0{,}810$ & $-1{,}274$ & $-1{,}560$ \
 $-R_o'\,\alpha_j\,I$ \quad ($R_o$ tramite il SOC) & $+0{,}001$ & $+0{,}002$ & $+0{,}024$ \\
 $-R_o$ \quad ($I$ diretta) & $-8{,}239$ & $-8{,}238$ & $-8{,}216$ \\
 \midrule
-$D_j$ [mV/A] & $-9{,}220$ & $-9{,}853$ & $-14{,}897$ \\
-$E_j = \alpha_j$ [$10^{-3}~\mathrm{A}^{-1}$] & $-0{,}201$ & $-0{,}402$ & $-6{,}033$ \\
+$d_j$ [mV/A] & $-9{,}220$ & $-9{,}853$ & $-14{,}897$ \\
+$\alpha_j$ [$10^{-3}~\mathrm{A}^{-1}$] & $-0{,}201$ & $-0{,}402$ & $-6{,}033$ \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1100,7 +1119,7 @@ tensione a vuoto, perché la corrente in più ha scaricato di più la cella.
 Le derivate così calcolate sono esatte per il modello discreto. Rispetto a
 quelle del modello continuo ereditano invece l'errore di Eulero, lo stesso
 discusso nella sezione~\ref{sec:discreto} per lo stato: $\alpha_j$ coincide con
-$\alpha(t_j)$, mentre $\beta_j$ e $D_j$ approssimano $\beta(t_j)$ e $d(t_j)$.
+$\alpha(t_j)$, mentre $\beta_j$ e $d_j$ approssimano $\beta(t_j)$ e $d(t_j)$.
 Raccogliendo $\beta_{j-1}$ nella \eqref{eq:beta},
 \[
   \beta_j = \left(1 - \frac{\Tc}{\tau}\right)\beta_{j-1}
@@ -1115,23 +1134,23 @@ derivate sono coerenti con quello.
 
 \subsubsection{Dalle derivate al QP}
 
-Con $D_j$ ed $E_j$ calcolati per ogni passo e per ogni cella, lo sviluppo
+Con $d_j$ e $\alpha_j$ calcolati per ogni passo e per ogni cella, lo sviluppo
 \eqref{eq:lin} è completo:
 \[
-  y_{k+j}(u_k) \simeq \bar Y_j + D_j\,\bigl(u_k - \bar u\bigr), \qquad
-  s_{k+j}(u_k) \simeq \bar S_j + E_j\,\bigl(u_k - \bar u\bigr), \qquad
+  y_{k+j}(u_k) \simeq \bar Y_j + d_j\,\bigl(u_k - \bar u\bigr), \qquad
+  s_{k+j}(u_k) \simeq \bar S_j + \alpha_j\,\bigl(u_k - \bar u\bigr), \qquad
   j = 1, \dots, p .
 \]
 Sono la \eqref{eq:c-y-lin} e la \eqref{eq:c-s-lin} negli istanti di
 campionamento. Gli infiniti vincoli del tempo continuo diventano $p$ vincoli
 per cella e l'integrale del costo una somma su $j$: è il QP della prossima
-sezione. $\beta_j$ non vi compare: si esaurisce nel calcolo di $D_j$.
+sezione. $\beta_j$ non vi compare: si esaurisce nel calcolo di $d_j$.
 
 \section{Dalla linearizzazione al QP}\label{sec:qp}
 
 La sezione~\ref{sec:derivate} fornisce, per ogni cella $n$ e per ogni passo
 $j$, i quattro numeri della \eqref{eq:lin}: $\bar Y_{j,n}$, $\bar S_{j,n}$,
-$D_{j,n}$ ed $E_{j,n}$. Qui si vede, in sintesi, come entrano nel QP; la
+$d_{j,n}$ e $\alpha_{j,n}$. Qui si vede, in sintesi, come entrano nel QP; la
 costruzione completa, con le motivazioni di ogni passaggio, è nel documento
 \file{Problema_QP_MPC.pdf}.
 
@@ -1215,40 +1234,42 @@ all'istante $k$.
 \paragraph{Risposta libera e risposta forzata.} Conviene anzitutto isolare
 nella \eqref{eq:lin} la parte che non dipende da $u^n_k$:
 \begin{equation}
-  y^n_{k+j}(u^n_k) \simeq Y^\lib_{j,n} + D_{j,n}\,u^n_k,
-  \qquad Y^\lib_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n .
+  y^n_{k+j}(u^n_k) \simeq Y^\lib_{j,n} + d_{j,n}\,u^n_k,
+  \qquad Y^\lib_{j,n} = \bar Y_{j,n} - d_{j,n}\,\bar u^n .
   \label{eq:y0}
 \end{equation}
 $Y^\lib_{j,n}$ è la \emph{risposta libera}: il valore che la retta della cella
-$n$ dà in $u^n_k = 0$. Il prodotto $D_{j,n}\,u^n_k$ è la \emph{risposta forzata},
+$n$ dà in $u^n_k = 0$. Il prodotto $d_{j,n}\,u^n_k$ è la \emph{risposta forzata},
 l'effetto della corrente di bilanciamento.
 
 \paragraph{Il problema quadratico.} Le incognite del QP sono raccolte in
 \[
-  z = \begin{bmatrix} u_k \\ \varepsilon \\ e \end{bmatrix},
+  z = \begin{bmatrix} u_k \\ \varepsilon \\ \varepsilon_y \end{bmatrix},
 \]
 con $u_k \in \mathbb{R}^N$ le correnti di bilanciamento scelte all'istante $k$, $\varepsilon$ le
 variabili ausiliarie del costo (nessuna per $J_t$, $p$ per $J_m$, $2p$ per
-$J_\Delta$) ed $e \ge 0$ la variabile che rilassa il vincolo di tensione
-(eq.~17). Il problema è
+$J_\Delta$) e $\varepsilon_y \ge 0$ la variabile che rilassa il vincolo di
+tensione (eq.~17). Il problema è
 \[
   \min_z \; \tfrac12\, z^\top H z + f^\top z
   \qquad \text{con} \qquad A z \le b, \quad A_{eq}\, z = b_{eq} .
 \]
 Qui $f$ è il vettore del termine lineare del costo, secondo la notazione di
-\texttt{quadprog}: non è la funzione $f(x, I)$ della
+\texttt{quadprog}: non è la funzione $f(\zeta, I)$ della
 sezione~\ref{sec:modello}. In tutte le formulazioni il costo contiene
-$\rho\, u_k^\top u_k + W e^2$, dove $\rho$ è il peso sulle correnti di
-bilanciamento (la matrice $R$ del paper vale $\rho$ volte l'identità; nel
-codice $\rho$ è \texttt{par.mpc.r} moltiplicato per $p/p_{\mathrm{rif}}$) e $W$
-il peso su $e$. Contribuiscono a $H$ con $2\rho$ sulla diagonale delle correnti e
-$2W$ su $e$; da dove venga il fattore 2 si vede nella
-sezione~\ref{sec:costo}, a proposito di $J_t$.
+$\rho\, u_k^\top u_k + W \varepsilon_y^2$, dove $\rho$ è il peso sulle correnti di
+bilanciamento (la matrice $R$ del paper vale $\rho$ volte l'identità) e $W$
+il peso su $\varepsilon_y$. Il peso $\rho$ è scalato con l'orizzonte,
+$\rho = \rho_{\mathrm{rif}}\, p / p_{\mathrm{rif}}$, dove $\rho_{\mathrm{rif}}$
+è \texttt{par.mpc.Jt}, \texttt{par.mpc.Jm} o \texttt{par.mpc.Jdelta} secondo
+la formulazione. I due termini contribuiscono a $H$ con $2\rho$ sulla
+diagonale delle correnti e $2W$ su $\varepsilon_y$; da dove venga il fattore 2
+si vede nella sezione~\ref{sec:costo}, a proposito di $J_t$.
 
 \subsection{Costo}\label{sec:costo}
 
 Il costo è la somma di un termine di bilanciamento, diverso per ogni
-formulazione, e dei due termini comuni $\rho\, u_k^\top u_k$ e $W e^2$. Il termine
+formulazione, e dei due termini comuni $\rho\, u_k^\top u_k$ e $W \varepsilon_y^2$. Il termine
 di $J_t$ è svolto qui passo per passo: è l'unico in cui la linearizzazione
 produce termini di secondo grado, e i passaggi sono gli stessi che servono
 per leggere $H$ e $f$ da qualunque costo. Quelli di $J_m$ e $J_\Delta$ sono
@@ -1293,17 +1314,17 @@ prolungamento della tangente fino a $u^n_k = 0$.
 dalla cella nominale diventa
 \[
   y^n_{k+j} - y^0_{k+j}
-  = Y^\lib_{j,n} + D_{j,n}\,u^n_k - y^0_{k+j}
-  = D_{j,n}\,u^n_k + c_{j,n} ,
+  = Y^\lib_{j,n} + d_{j,n}\,u^n_k - y^0_{k+j}
+  = d_{j,n}\,u^n_k + c_{j,n} ,
   \qquad
   c_{j,n} = Y^\lib_{j,n} - y^0_{k+j} .
 \]
 $c_{j,n}$ è lo \emph{scarto}: di quanto, secondo la retta, la cella $n$
 starebbe sopra ($c_{j,n} > 0$) o sotto ($c_{j,n} < 0$) la cella nominale
-all'istante $k+j$ con $u^n_k = 0$. Come $D_{j,n}$, è un numero noto prima di
+all'istante $k+j$ con $u^n_k = 0$. Come $d_{j,n}$, è un numero noto prima di
 ottimizzare. Il costo diventa
 \begin{equation}
-  J_t(u_k) = \sum_{j=1}^{p} \sum_{n=1}^{N} \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2
+  J_t(u_k) = \sum_{j=1}^{p} \sum_{n=1}^{N} \bigl(d_{j,n}\,u^n_k + c_{j,n}\bigr)^2
            + \rho \sum_{n=1}^{N} (u^n_k)^2 .
   \tag{Q1}\label{eq:q-jt}
 \end{equation}
@@ -1314,7 +1335,7 @@ celle:
 \begin{equation}
   J_t(u_k) = \sum_{n=1}^{N} J^n(u^n_k) ,
   \qquad
-  J^n(u^n_k) = \sum_{j=1}^{p} \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2 + \rho\,(u^n_k)^2 .
+  J^n(u^n_k) = \sum_{j=1}^{p} \bigl(d_{j,n}\,u^n_k + c_{j,n}\bigr)^2 + \rho\,(u^n_k)^2 .
   \tag{Q2}\label{eq:q-separa}
 \end{equation}
 Ogni $J^n$ contiene una sola incognita, $u^n_k$: il costo è la somma di $N$
@@ -1325,26 +1346,26 @@ vincoli, attraverso $\sum_n u^n_k = 0$ (sezione~\ref{sec:vincoli}).
 
 \paragraph{Passo 3: sviluppare il quadrato.} Si fissa una cella. Per
 alleggerire la scrittura, in questo passo e nel prossimo l'indice $n$ è
-sottinteso: $D_j$, $c_j$ e $u$ stanno per $D_{j,n}$, $c_{j,n}$ e $u^n_k$. Ogni
+sottinteso: $d_j$, $c_j$ e $u$ stanno per $d_{j,n}$, $c_{j,n}$ e $u^n_k$. Ogni
 addendo della \eqref{eq:q-separa} è il quadrato di un binomio:
 \[
-  (D_j\,u + c_j)^2 = D_j^2\,u^2 + 2\,D_j\,c_j\,u + c_j^2 .
+  (d_j\,u + c_j)^2 = d_j^2\,u^2 + 2\,d_j\,c_j\,u + c_j^2 .
 \]
 Con un orizzonte di due passi, $p = 2$, il conto per esteso è
 \begin{align*}
-  J^n(u) &= (D_1 u + c_1)^2 + (D_2 u + c_2)^2 + \rho\,u^2 \\
-         &= D_1^2 u^2 + 2 D_1 c_1 u + c_1^2
-            \;+\; D_2^2 u^2 + 2 D_2 c_2 u + c_2^2
+  J^n(u) &= (d_1 u + c_1)^2 + (d_2 u + c_2)^2 + \rho\,u^2 \\
+         &= d_1^2 u^2 + 2 d_1 c_1 u + c_1^2
+            \;+\; d_2^2 u^2 + 2 d_2 c_2 u + c_2^2
             \;+\; \rho\,u^2 \\
-         &= \bigl(D_1^2 + D_2^2 + \rho\bigr)\, u^2
-            + 2\,\bigl(D_1 c_1 + D_2 c_2\bigr)\, u
+         &= \bigl(d_1^2 + d_2^2 + \rho\bigr)\, u^2
+            + 2\,\bigl(d_1 c_1 + d_2 c_2\bigr)\, u
             + \bigl(c_1^2 + c_2^2\bigr) .
 \end{align*}
 Nell'ultima riga si sono raccolti i termini con $u^2$, quelli con $u$ e
 quelli senza $u$. Per un orizzonte qualsiasi si raccoglie allo stesso modo:
 \begin{equation}
-  J^n(u) = \underbrace{\Bigl(\sum_{j=1}^{p} D_j^2 + \rho\Bigr)}_{\text{coefficiente di } u^2}\, u^2
-         + \underbrace{\Bigl(2\sum_{j=1}^{p} D_j\,c_j\Bigr)}_{\text{coefficiente di } u}\, u
+  J^n(u) = \underbrace{\Bigl(\sum_{j=1}^{p} d_j^2 + \rho\Bigr)}_{\text{coefficiente di } u^2}\, u^2
+         + \underbrace{\Bigl(2\sum_{j=1}^{p} d_j\,c_j\Bigr)}_{\text{coefficiente di } u}\, u
          + \underbrace{\sum_{j=1}^{p} c_j^2}_{\text{costante}} .
   \tag{Q3}\label{eq:q-sviluppo}
 \end{equation}
@@ -1366,52 +1387,52 @@ $u^2$ e di $u$; la costante si può trascurare, perché sommare una costante a
 un costo ne sposta il valore ma non il punto in cui è minimo. Confrontando con
 la \eqref{eq:q-sviluppo}:
 \[
-  \tfrac12\, H_{nn} = \sum_{j=1}^{p} D_j^2 + \rho
+  \tfrac12\, H_{nn} = \sum_{j=1}^{p} d_j^2 + \rho
   \quad\Longrightarrow\quad
-  H_{nn} = 2\sum_{j=1}^{p} D_j^2 + 2\rho ,
+  H_{nn} = 2\sum_{j=1}^{p} d_j^2 + 2\rho ,
   \qquad\qquad
-  f_n = 2\sum_{j=1}^{p} D_j\,c_j .
+  f_n = 2\sum_{j=1}^{p} d_j\,c_j .
 \]
 Rimettendo l'indice $n$ e ricordando che $c_{j,n} = Y^\lib_{j,n} - y^0_{k+j}$:
 \begin{equation}
-  H_{nn} = 2\sum_{j=1}^{p} D_{j,n}^2 + 2\rho, \qquad
-  f_n = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^\lib_{j,n} - y^0_{k+j}\bigr) .
+  H_{nn} = 2\sum_{j=1}^{p} d_{j,n}^2 + 2\rho, \qquad
+  f_n = 2\sum_{j=1}^{p} d_{j,n}\,\bigl(Y^\lib_{j,n} - y^0_{k+j}\bigr) .
   \label{eq:jt-hf}
 \end{equation}
 I due fattori 2 hanno origini diverse. Quello in $H$ compensa il
 $\tfrac12$ della forma di \texttt{quadprog}, che è una convenzione: con esso il
 gradiente del costo è $Hz + f$ e $H$ è la matrice delle derivate seconde.
 Quello in $f$ viene dal doppio prodotto del binomio. Lo stesso ragionamento,
-applicato a $\rho\,(u^n_k)^2$ e a $W e^2$ da soli, dà i contributi $2\rho$ e
+applicato a $\rho\,(u^n_k)^2$ e a $W \varepsilon_y^2$ da soli, dà i contributi $2\rho$ e
 $2W$ citati all'inizio della sezione.
 
 \paragraph{Verifica: il minimo per una cella.} Ignorando per un momento i
 vincoli, $J^n$ è una parabola in $u$. Il coefficiente di $u^2$,
-$\sum_j D_j^2 + \rho$, è positivo, quindi la parabola è rivolta verso l'alto e
+$\sum_j d_j^2 + \rho$, è positivo, quindi la parabola è rivolta verso l'alto e
 ha un solo minimo, dove la derivata si annulla:
 \[
-  \frac{dJ^n}{du} = 2\Bigl(\sum_j D_j^2 + \rho\Bigr) u + 2\sum_j D_j\,c_j
+  \frac{dJ^n}{du} = 2\Bigl(\sum_j d_j^2 + \rho\Bigr) u + 2\sum_j d_j\,c_j
                   = H_{nn}\, u + f_n = 0 .
 \]
 Ne segue
 \begin{equation}
   u^{n,*}_k = -\frac{f_n}{H_{nn}}
-        = \frac{\sum_{j} D_{j,n}\,\bigl(y^0_{k+j} - Y^\lib_{j,n}\bigr)}
-               {\sum_{j} D_{j,n}^2 + \rho} .
+        = \frac{\sum_{j} d_{j,n}\,\bigl(y^0_{k+j} - Y^\lib_{j,n}\bigr)}
+               {\sum_{j} d_{j,n}^2 + \rho} .
   \tag{Q4}\label{eq:q-minimo}
 \end{equation}
 Lo stesso risultato si ottiene derivando direttamente la
 \eqref{eq:q-separa}, senza sviluppare i quadrati: per la regola della
-funzione composta $\frac{d}{du}(D_j u + c_j)^2 = 2 D_j\,(D_j u + c_j)$, e
+funzione composta $\frac{d}{du}(d_j u + c_j)^2 = 2 d_j\,(d_j u + c_j)$, e
 sommando su $j$ si ritrova la stessa equazione. È una conferma che
 $H_{nn}$ e $f_n$ sono giusti.
 
 La \eqref{eq:q-minimo} è la soluzione di un problema ai minimi quadrati: ci
 sono $p$ scarti da colmare e una sola corrente, che al passo $j$ sposta la
-tensione di $D_{j,n}\,u^n_k$. Non potendo annullarli tutti con un solo numero,
+tensione di $d_{j,n}\,u^n_k$. Non potendo annullarli tutti con un solo numero,
 si sceglie quello che rende minima la somma dei quadrati di ciò che resta. Il
 peso $\rho$ al denominatore frena la corrente. Anche il segno torna: se la
-cella sta sopra la cella nominale ($c_{j,n} > 0$), essendo $D_{j,n} < 0$
+cella sta sopra la cella nominale ($c_{j,n} > 0$), essendo $d_{j,n} < 0$
 risulta $u^{n,*}_k > 0$, cioè la cella viene scaricata di più e la sua tensione
 scende verso $y^0_{k+j}$.
 
@@ -1423,23 +1444,23 @@ nell'esempio della sezione~\ref{sec:derdiscreto} (cella con fattori di
 deviazione uguali a 1, $s_k = 0{,}6$, $I = 10$~A), nelle colonne $j = 1$ e
 $j = 2$:
 \[
-  D_1 = -9{,}220 \cdot 10^{-3}~\text{V/A}, \qquad
-  D_2 = -9{,}853 \cdot 10^{-3}~\text{V/A}.
+  d_1 = -9{,}220 \cdot 10^{-3}~\text{V/A}, \qquad
+  d_2 = -9{,}853 \cdot 10^{-3}~\text{V/A}.
 \]
 Gli scarti $c_j = Y^\lib_j - y^0_{k+j}$ sono valori di prova,
 $c_1 = +20$~mV e $c_2 = +25$~mV: la cella sta sopra la cella nominale e se ne
 allontana. Il peso, con i valori di
-\file{init_parametri.m} (\texttt{par.mpc.r.Jt} $= 2 \cdot 10^{-4}$,
+\file{init_parametri.m} (\texttt{par.mpc.Jt} $= 2 \cdot 10^{-4}$,
 $p_{\mathrm{rif}} = 5$), è $\rho = 2 \cdot 10^{-4} \cdot 2/5 = 8 \cdot
-10^{-5}$. Il costo è in V$^2$ e $u$ in ampere, quindi $D_j^2$ e $\rho$ sono in
-V$^2$/A$^2$ e $D_j c_j$ in V$^2$/A.
+10^{-5}$. Il costo è in V$^2$ e $u$ in ampere, quindi $d_j^2$ e $\rho$ sono in
+V$^2$/A$^2$ e $d_j c_j$ in V$^2$/A.
 
 I due coefficienti della \eqref{eq:q-sviluppo} che contengono $u$ valgono
 \begin{align*}
-  D_1^2 + D_2^2 + \rho
+  d_1^2 + d_2^2 + \rho
     &= 0{,}8501 \cdot 10^{-4} + 0{,}9708 \cdot 10^{-4} + 0{,}8000 \cdot 10^{-4}
      = 2{,}6209 \cdot 10^{-4} , \\
-  2\,(D_1 c_1 + D_2 c_2)
+  2\,(d_1 c_1 + d_2 c_2)
     &= 2\,\bigl(-1{,}8440 \cdot 10^{-4} - 2{,}4633 \cdot 10^{-4}\bigr)
      = -8{,}6145 \cdot 10^{-4} ,
 \end{align*}
@@ -1450,9 +1471,9 @@ $f_1 = -8{,}6145 \cdot 10^{-4}$. La \eqref{eq:q-minimo} dà
 \]
 Con questa corrente la retta dà, rispetto alla cella nominale,
 \begin{align*}
-  y_{k+1} - y^0_{k+1} &= D_1 u^* + c_1 = -15{,}15 + 20 = +4{,}85~\text{mV}
+  y_{k+1} - y^0_{k+1} &= d_1 u^* + c_1 = -15{,}15 + 20 = +4{,}85~\text{mV}
     && \text{al primo passo}, \\
-  y_{k+2} - y^0_{k+2} &= D_2 u^* + c_2 = -16{,}19 + 25 = +8{,}81~\text{mV}
+  y_{k+2} - y^0_{k+2} &= d_2 u^* + c_2 = -16{,}19 + 25 = +8{,}81~\text{mV}
     && \text{al secondo}:
 \end{align*}
 la cella si avvicina alla cella nominale ma non la raggiunge, perché $\rho$
@@ -1494,21 +1515,21 @@ il basso fino alla cella più alta.
 Sostituendo la predizione linearizzata, tutti i vincoli diventano lineari in
 $z$ (per ogni $j = 1,\dots,p$ e $n = 1,\dots,N$):
 \begin{align}
-  -D_{j,n}\,u^n_k - e &\le Y^\lib_{j,n} - y_{\min}
+  -d_{j,n}\,u^n_k - \varepsilon_y &\le Y^\lib_{j,n} - y_{\min}
      && \text{tensione minima rilassata, eq.~(6e) e (17)} \\
-  \varepsilon_j - D_{j,n}\,u^n_k &\le Y^\lib_{j,n}
+  \varepsilon_j - d_{j,n}\,u^n_k &\le Y^\lib_{j,n}
      && \text{eq.~(10) e (13a), per } J_m \text{ e } J_\Delta \\
-  D_{j,n}\,u^n_k - \varepsilon_{p+j} &\le -Y^\lib_{j,n}
+  d_{j,n}\,u^n_k - \varepsilon_{p+j} &\le -Y^\lib_{j,n}
      && \text{eq.~(13b), per } J_\Delta \\
   u_{\min} \le u^n_k &\le u_{\max}
      && \text{eq.~(6d)} \\
-  -e &\le 0 \\
+  -\varepsilon_y &\le 0 \\
   \textstyle\sum_{n} u^n_k &= 0
      && \text{eq.~(6f)}
 \end{align}
 Se la grandezza bilanciata è il SOC anziché la tensione, nel costo e nei
-vincoli sulle $\varepsilon$ si usano $\bar S$ ed $E$ al posto di $\bar Y$ e
-$D$; il vincolo di tensione minima usa sempre $\bar Y$ e $D$.
+vincoli sulle $\varepsilon$ si usano $\bar S$ e $\alpha$ al posto di $\bar Y$ e
+$d$; il vincolo di tensione minima usa sempre $\bar Y$ e $d$.
 
 \subsection{Punto di partenza del solutore}
 
@@ -1518,7 +1539,7 @@ di linearizzazione, quindi un punto ammissibile si scrive direttamente:
   u_k = \bar u, \qquad
   \varepsilon_j = \min_n \bar Y_{j,n}, \qquad
   \varepsilon_{p+j} = \max_n \bar Y_{j,n}, \qquad
-  e = \max\bigl(0,\; y_{\min} - \min_{j,n} \bar Y_{j,n}\bigr).
+  \varepsilon_y = \max\bigl(0,\; y_{\min} - \min_{j,n} \bar Y_{j,n}\bigr).
 \]
 \texttt{quadprog} (algoritmo \texttt{active-set}) parte da lì. Se non trova una
 soluzione, l'uscita è questo punto: la mossa precedente viene mantenuta.
@@ -1532,8 +1553,8 @@ soluzione, l'uscita è questo punto: la mossa precedente viene mantenuta.
         dalla media degli stati.
   \item \file{Predizione_linearizzata}: con la corrente $i_k + u^n_{k-1}$ si
         calcolano la traiettoria di linearizzazione $\bar Y$, $\bar S$, con le
-        \eqref{eq:soc}--\eqref{eq:y}, e i coefficienti di sensibilità $D$ ed
-        $E$, con le \eqref{eq:beta}--\eqref{eq:D}.
+        \eqref{eq:soc}--\eqref{eq:y}, e i coefficienti di sensibilità $d$ e
+        $\alpha$, con le \eqref{eq:beta}--\eqref{eq:D}.
   \item \file{Problema_QP}: si costruiscono $H$, $f$, $A$, $b$, $A_{eq}$,
         $b_{eq}$ e il punto di partenza.
   \item \file{Solutore_QP}: \texttt{quadprog} restituisce $z$; al pacco si
@@ -1576,7 +1597,7 @@ cambiato le durate.
 \centering
 \begin{tabular}{llcccc}
 \toprule
- & & \multicolumn{2}{c}{Durata [s]} & Scarto massimo & Sforzo medio [A$^2$] \\
+ & & \multicolumn{2}{c}{Durata [s]} & Scarto massimo & Sforzo medio $\bar w$ [A$^2$] \\
 Configurazione & Costo & \texttt{nlmpc} & QP & su $u_k$ [A] & \texttt{nlmpc} / QP \\
 \midrule
 $N=5$, $\Tc=1$ s, $p=5$   & $J_t$      & 2529 & 2529 & $3{,}7\cdot10^{-3}$ & 5,3526 / 5,3526 \\
@@ -1589,7 +1610,10 @@ $N=3$, $\Tc=20$ s, $p=30$ & $J_t$      & 8120 & 8120 & $0{,}17$            & 1,0
 \bottomrule
 \end{tabular}
 \caption{QP linearizzato a confronto con il problema non lineare. Gli scarti
-maggiori del secondo caso compaiono in pochi passi isolati.}
+maggiori del secondo caso compaiono in pochi passi isolati. Lo sforzo di
+bilanciamento al passo $k$ è $w_k = u_k^\top u_k = \sum_n (u^n_k)^2$ (nel
+paper $e_k$), e $\bar w = \frac1K \sum_k w_k$ è la sua media sui $K$ passi
+della simulazione.}
 \label{tab:confronto}
 \end{table}
 
@@ -1599,11 +1623,12 @@ Nel modello \file{Bilanciamento_MPC.slx} ogni passaggio è un blocco del
 sottosistema \file{Controllo}, e ogni blocco chiama una funzione:
 
 \begin{center}
+\small
 \begin{tabular}{lll}
 \toprule
 Passaggio & Blocco in \file{Controllo} & File \\
 \midrule
-Cella nominale $y^0_{k+j}$ & \file{Cella_nominale} & \file{qp_cella_nominale.m} \\
+Cella nominale $y^0_{k+j}$ & \file{Cella_nominale} & \file{cella_nominale_semplice.m} \\
 Predizione e derivate, sezione~\ref{sec:derdiscreto} & \file{Predizione_linearizzata} & \file{qp_predizione.m} \\
 Valore e derivata dei parametri, \eqref{eq:tabella} & --- & \file{qp_tabella.m} \\
 Matrici del QP e punto di partenza & \file{Problema_QP} & \file{qp_problema.m} \\
@@ -1621,8 +1646,8 @@ sono tre file che il modello non usa:
 \begin{itemize}
   \item \file{predizione_linearizzata_semplice.m} fa lo stesso calcolo una
         cella alla volta, con numeri singoli, ed è diviso nelle stesse parti di
-        questo documento (\file{cella_nominale_semplice.m} fa lo stesso per la
-        cella nominale);
+        questo documento (\file{qp_cella_nominale.m} è la versione con vettori
+        del calcolo della cella nominale);
   \item \file{Predizione_linearizzata_blocchi.slx} fa lo stesso calcolo con
         blocchi Simulink, un sottosistema per ogni parte;
   \item \file{esempio_sensibilita_ode45.m} applica le formule generali della
@@ -1630,7 +1655,8 @@ sono tre file che il modello non usa:
 \end{itemize}
 \file{predizione_linearizzata_semplice.m} usa la notazione di questo documento:
 ogni variabile ha il nome del simbolo corrispondente, e la derivata rispetto a
-$s$, qui indicata con l'apice, nel codice ha il prefisso \texttt{d}.
+$s$, qui indicata con l'apice, nel codice ha il prefisso \file{ds_}, che
+nomina anche la variabile di derivazione.
 
 \begin{center}
 \begin{tabular}{ll@{\qquad}ll}
@@ -1638,19 +1664,19 @@ $s$, qui indicata con l'apice, nel codice ha il prefisso \texttt{d}.
 Simbolo & Nome nel codice & Simbolo & Nome nel codice \\
 \midrule
 $s_k$, $V_{p,k}$ & \file{s_k}, \file{Vp_k} & $s_{k+j}$, $V_{p,k+j}$ & \texttt{s}, \texttt{Vp} \\
-$i_k$, $\bar u$ & \file{i_k}, \file{u_bar} & $I$ & \texttt{I} \\
-$\Tc$, $\kappa$ & \texttt{Tc}, \texttt{kappa} & $\alpha_j$, $\beta_j$ & \texttt{alfa}, \texttt{beta} \\
-$V_{oc}$, $R_o$ & \texttt{Voc}, \texttt{Ro} & $V_{oc}'$, $R_o'$ & \texttt{dVoc}, \texttt{dRo} \\
-$R_p$, $C_p$, $\tau$ & \texttt{Rp}, \texttt{Cp}, \texttt{tau} & $R_p'$, $C_p'$, $\tau'$ & \texttt{dRp}, \texttt{dCp}, \texttt{dtau} \\
-$f_{R_o}$, $R_o^{\nom}$ & \file{f_Ro}, \file{tabella_Ro} & $y_{k+j}$, $D_j$, $E_j$ & \texttt{y}, \texttt{D}, \texttt{E} \\
+$i_k$, $\bar u$ & \file{i_pacco_k}, \file{u_bar} & $I$ & \file{I_cella} \\
+$\Tc$, $\kappa$ & \texttt{Tc}, \texttt{kappa} & $\alpha_j$, $\beta_j$ & \file{alfa_j}, \file{beta_j} \\
+$V_{oc}$, $R_o$ & \texttt{Voc}, \texttt{Ro} & $V_{oc}'$, $R_o'$ & \file{ds_Voc}, \file{ds_Ro} \\
+$R_p$, $C_p$, $\tau$ & \texttt{Rp}, \texttt{Cp}, \texttt{tau} & $R_p'$, $C_p'$, $\tau'$ & \file{ds_Rp}, \file{ds_Cp}, \file{ds_tau} \\
+$\varphi_{R_o}$, $R_o^{\nom}$ & \file{phi_Ro}, \file{Ro_tab} & $y_{k+j}$, $d_j$ & \texttt{y}, \file{d_j} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
 I fattori e le tabelle degli altri parametri seguono lo stesso schema
-(\file{f_Voc}, \file{tabella_Voc}, e così via). Le quattro matrici restituite
-si chiamano \texttt{Y}, \texttt{S}, \texttt{dY}, \texttt{dS}: raccolgono $y$,
-$s$, $D$ ed $E$ di tutti i passi e di tutte le celle.
+(\file{phi_Voc}, \file{Voc_tab}, e così via). Le quattro matrici restituite
+si chiamano \file{Y_bar}, \file{S_bar}, \texttt{d}, \texttt{alfa}: raccolgono
+$y$, $s$, $d$ e $\alpha$ di tutti i passi e di tutte le celle.
 
 \end{document}

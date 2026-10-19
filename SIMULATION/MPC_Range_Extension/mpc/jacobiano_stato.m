@@ -1,31 +1,34 @@
-function [A, Bmv] = jacobiano_stato(x, u, dati)
-%JACOBIANO_STATO  Jacobiani della funzione di stato stato_pacco (Remark 3 del paper).
+function [dzeta_zeta_next, dmv_zeta_next] = jacobiano_stato(zeta, ingressi, dati)
+%JACOBIANO_STATO  Jacobiani della funzione di stato zeta_next (Remark 3 del paper).
 %
-% A = d(x+)/dx (2N x 2N), Bmv = d(x+)/d(mv) (2N x numero di variabili manipolate).
+% zeta = [s; Vp] e' lo stato del pacco, ingressi = [u; epsilon; i_pacco] il
+% vettore che nlmpc passa alla funzione di stato.
+%   dzeta_zeta_next = d(zeta_{k+1})/d(zeta_k)   (2N x 2N)
+%   dmv_zeta_next   = d(zeta_{k+1})/d(mv)       (2N x numero di variabili manipolate)
 
-pacco = dati.pacco;
-Ts = dati.par.mpc.Ts;
-N  = pacco.numero_celle;
-s  = x(1:N);
-Vp = x(N+1:2*N);
-ic = u(end) + u(1:N);
-[~, ~, R_pol, C_pol, derivata] = parametri_cella(pacco, s);
+pacco   = dati.pacco;
+Tc      = dati.par.mpc.Tc;
+N       = pacco.N;
+s       = zeta(1:N);
+Vp      = zeta(N+1:2*N);
+I_cella = ingressi(end) + ingressi(1:N);
+[~, ~, Rp, Cp, ds] = parametri_cella(pacco, s);
 
-% (2a): s+ = min(s - kappa*i, 1)
-kappa  = pacco.rendimento .* Ts ./ (3600*pacco.capacita_Ah) .* ones(N, 1);
-libero = (s - kappa.*ic) < 1;                 % derivata nulla se il SOC satura a 1
+% (2a): s_next = min(s - kappa*I_cella, 1)
+kappa  = pacco.eta .* Tc ./ (3600*pacco.C) .* ones(N, 1);
+libero = (s - kappa.*I_cella) < 1;            % derivata nulla se il SOC satura a 1
 
-% (2b): Vp+ = Vp - Ts*g(s)*Vp + Ts*h(s)*i,  g = 1/(Rp*Cp),  h = 1/Cp
-g  = 1 ./ (R_pol.*C_pol);
-h  = 1 ./ C_pol;
-dg = -(derivata.R_pol.*C_pol + R_pol.*derivata.C_pol) ./ (R_pol.*C_pol).^2;
-dh = -derivata.C_pol ./ C_pol.^2;
+% (2b): Vp_next = Vp - Tc*inv_tau(s)*Vp + Tc*inv_Cp(s)*I_cella,  inv_tau = 1/(Rp*Cp),  inv_Cp = 1/Cp
+inv_tau    = 1 ./ (Rp.*Cp);
+inv_Cp     = 1 ./ Cp;
+ds_inv_tau = -(ds.Rp.*Cp + Rp.*ds.Cp) ./ (Rp.*Cp).^2;
+ds_inv_Cp  = -ds.Cp ./ Cp.^2;
 
-A = [diag(double(libero)),             zeros(N);
-     diag(Ts.*(-dg.*Vp + dh.*ic)),     diag(1 - Ts.*g)];
+dzeta_zeta_next = [diag(double(libero)),                         zeros(N);
+                   diag(Tc.*(-ds_inv_tau.*Vp + ds_inv_Cp.*I_cella)), diag(1 - Tc.*inv_tau)];
 
-Bmv = zeros(2*N, numel(u) - 1);
-Bmv(1:N, 1:N)     = diag(-kappa.*libero);
-Bmv(N+1:2*N, 1:N) = diag(Ts.*h);
+dmv_zeta_next = zeros(2*N, numel(ingressi) - 1);
+dmv_zeta_next(1:N, 1:N)     = diag(-kappa.*libero);
+dmv_zeta_next(N+1:2*N, 1:N) = diag(Tc.*inv_Cp);
 
 end

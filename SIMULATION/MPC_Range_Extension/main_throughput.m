@@ -26,7 +26,7 @@ for h = 1:numel(orizzonti)
         tempi = zeros(numel(k), 1);
         for m = 1:numel(k)
             tic
-            [~, ctrl] = mpc_bilanciamento(ctrl, rif.s(k(m), :).', rif.Vp(k(m), :).', rif.i(k(m)));
+            [~, ctrl] = mpc_bilanciamento(ctrl, rif.s(k(m), :).', rif.Vp(k(m), :).', rif.i_pacco(k(m)));
             tempi(m) = toc;
         end
         t_ms(h, c) = 1e3 * median(tempi);
@@ -34,7 +34,7 @@ for h = 1:numel(orizzonti)
 end
 
 %% Tabella (stile Tabella II)
-fprintf('\nTempo mediano di un passo MPC [ms], N = %d celle\n', pacco.numero_celle);
+fprintf('\nTempo mediano di un passo MPC [ms], N = %d celle\n', pacco.N);
 fprintf('%4s %10s %10s %10s\n', 'p', tipi{:});
 for h = 1:numel(orizzonti)
     fprintf('%4d %10.2f %10.2f %10.2f\n', orizzonti(h), t_ms(h, :));

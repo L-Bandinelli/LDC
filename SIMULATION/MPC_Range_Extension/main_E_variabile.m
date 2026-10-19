@@ -25,15 +25,15 @@ end
 
 %% Tabella (stile Tabella III)
 fprintf('\nScenario B - E(t) periodica, periodo %g s\n', scen.t_E(end));
-fprintf('%-10s %3s %10s %11s %13s %14s  %s\n', 'Controllo', 'p', 'Durata [s]', ...
-    'Estensione', 'Energia [Wh]', 'Sforzo [A^2]', 'Arresto');
-fprintf('%-10s %3s %10.0f %11s %13.1f %14s  %s\n', 'nessuno', '-', base.durata, '-', ...
+fprintf('%-10s %3s %10s %11s %13s %20s  %s\n', 'Controllo', 'p', 'Durata [s]', ...
+    'Estensione', 'Energia [Wh]', 'Sforzo medio w [A^2]', 'Arresto');
+fprintf('%-10s %3s %10.0f %11s %13.1f %20s  %s\n', 'nessuno', '-', base.durata, '-', ...
     base.energia, '-', base.motivo);
 for h = 1:numel(orizzonti)
     for c = 1:numel(tipi)
-        r = ris{h, c};
-        fprintf('%-10s %3d %10.0f %10.2f%% %13.1f %14.2f  %s\n', r.tipo, r.p, r.durata, ...
-            100*(r.durata/base.durata - 1), r.energia, r.sforzo_medio, r.motivo);
+        result = ris{h, c};
+        fprintf('%-10s %3d %10.0f %10.2f%% %13.1f %20.2f  %s\n', result.tipo, result.p, result.durata, ...
+            100*(result.durata/base.durata - 1), result.energia, result.w_medio, result.motivo);
     end
 end
 
@@ -53,7 +53,7 @@ fig = grafico_confronto(confronto, par, 'Scenario B: tensione minima e sforzo di
 exportgraphics(fig, fullfile(uscita, 'B_confronto.png'), 'Resolution', 150);
 
 fig = grafico_confronto(confronto, par, 'Scenario B: ultimi periodi', ...
-    [base.durata - 1.5*scen.t_E(end), max(cellfun(@(r) r.durata, confronto))]);
+    [base.durata - 1.5*scen.t_E(end), max(cellfun(@(result) result.durata, confronto))]);
 exportgraphics(fig, fullfile(uscita, 'B_confronto_finale.png'), 'Resolution', 150);
 
 save(fullfile(uscita, 'B_risultati.mat'), 'ris', 'base', 'par', 'pacco');

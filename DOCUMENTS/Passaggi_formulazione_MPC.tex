@@ -14,6 +14,7 @@
 \newcommand{\Tc}{T_c}
 \newcommand{\nom}{\mathrm{nom}}
 \newcommand{\lib}{\mathrm{lib}}
+\newcommand{\stab}{s^{\mathrm{tab}}}        % punti di SOC delle tabelle
 \newcommand{\rif}{[L]}                      % Linearizzazione_MPC.pdf
 \newcommand{\rifq}{[Q]}                     % Problema_QP_MPC.pdf
 \newcommand{\ip}[1]{\textbf{(H#1)}}         % etichetta di un'ipotesi
@@ -50,9 +51,7 @@ documenti di riferimento:
   \item $n = 1,\dots,N$ è la cella, scritta come indice in alto; $k$ è
         l'istante attuale; $j = 1,\dots,p$ il passo lungo l'orizzonte; $\Tc$
         la durata di un passo. Le correnti sono positive in scarica.
-  \item La notazione è quella di \rif. {\rifq} usa ancora $Y^0_{j,n}$ per la
-        risposta libera, $r_j$ per la tensione della cella nominale e $u^n$
-        per $u^n_k$.
+  \item La notazione è quella di {\rif} e {\rifq}.
 \end{itemize}
 
 % ---------------------------------------------------------------------------
@@ -61,20 +60,20 @@ documenti di riferimento:
 \begin{itemize}
   \item[\ip{1}] \emph{Circuito equivalente.} Ogni cella è un generatore
         $V_{oc}$ in serie a una resistenza $R_o$ e a un ramo formato da $R_p$
-        e $C_p$ in parallelo. Lo stato è $x = (s, V_p)$: stato di carica
+        e $C_p$ in parallelo. Lo stato è $\zeta = (s, V_p)$: stato di carica
         (SOC) e tensione di polarizzazione. L'uscita è la tensione ai morsetti
         $y$.
   \item[\ip{2}] \emph{Parametri.} $V_{oc}$, $R_o$, $R_p$, $C_p$ dipendono solo
         dal SOC: non dalla temperatura, né dal verso della corrente, né
         dall'invecchiamento. Ciascuno è una tabella nominale su 7 punti di SOC
-        $\sigma_1 < \dots < \sigma_7$, interpolata linearmente. La cella $n$
-        differisce dalla nominale per un fattore moltiplicativo $f^n_P$ su
+        $\stab_1 < \dots < \stab_7$, interpolata linearmente. La cella $n$
+        differisce dalla nominale per un fattore moltiplicativo $\varphi^n_P$ su
         ogni parametro $P$ e per la capacità $C^n$. Per
-        $\sigma_i \le s < \sigma_{i+1}$:
+        $\stab_\ell \le s < \stab_{\ell+1}$:
         \[
-          P^n(s) = f^n_P\,\bigl[P^{\nom}_i + m_i\,(s - \sigma_i)\bigr], \quad
-          (P^n)'(s) = f^n_P\, m_i, \quad
-          m_i = \frac{P^{\nom}_{i+1} - P^{\nom}_i}{\sigma_{i+1} - \sigma_i} .
+          P^n(s) = \varphi^n_P\,\bigl[P^{\nom}_\ell + m_\ell\,(s - \stab_\ell)\bigr], \quad
+          (P^n)'(s) = \varphi^n_P\, m_\ell, \quad
+          m_\ell = \frac{P^{\nom}_{\ell+1} - P^{\nom}_\ell}{\stab_{\ell+1} - \stab_\ell} .
           \tag*{[L,~(T)]}
         \]
         Fuori dalla tabella si usa il valore dell'estremo, con derivata nulla.
@@ -127,7 +126,7 @@ documenti di riferimento:
         le condizioni iniziali della predizione. Nel modello Simulink si
         campionano dal modello del pacco; non c'è uno stimatore.
   \item[\ip{6}] \emph{Parametri noti.} La predizione della cella $n$ usa i
-        parametri della cella $n$: i fattori $f^n_P$ e la capacità $C^n$ sono
+        parametri della cella $n$: i fattori $\varphi^n_P$ e la capacità $C^n$ sono
         noti al controllore.
 \end{itemize}
 
@@ -218,10 +217,11 @@ documenti di riferimento:
         \end{align*}
   \item[\ip{10}] \emph{Peso sulle correnti.} La matrice di peso del paper è
         $R = \rho\, I_N$, con $\rho > 0$ uguale per tutte le celle e
-        proporzionale all'orizzonte: $\rho = r\, p / p_{\mathrm{rif}}$, dove
-        $r$ è \texttt{par.mpc.r}.
+        proporzionale all'orizzonte: $\rho = \rho_{\mathrm{rif}}\, p / p_{\mathrm{rif}}$,
+        dove $\rho_{\mathrm{rif}}$ è \texttt{par.mpc.Jt}, \texttt{par.mpc.Jm} o
+        \texttt{par.mpc.Jdelta} secondo la formulazione.
   \item[\ip{11}] \emph{Cella nominale.} In $J_t$, $y^0_{k+j}$ è la tensione di
-        una cella con parametri e capacità nominali ($f_P = 1$), che parte
+        una cella con parametri e capacità nominali ($\varphi_P = 1$), che parte
         dalla media degli stati misurati e subisce la sola corrente di pacco:
         \[
           s^0_k = \frac1N \sum_{n=1}^{N} s^n_k , \qquad
@@ -263,10 +263,10 @@ sottinteso.
         ordine $(u^n_k - \bar u^n)^2$):
         \[
         \begin{aligned}
-          y^n_{k+j}(u^n_k) &\simeq \bar Y_{j,n} + D_{j,n}\,(u^n_k - \bar u^n) , &
-          D_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} , \\
-          s^n_{k+j}(u^n_k) &\simeq \bar S_{j,n} + E_{j,n}\,(u^n_k - \bar u^n) , &
-          E_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} .
+          y^n_{k+j}(u^n_k) &\simeq \bar Y_{j,n} + d_{j,n}\,(u^n_k - \bar u^n) , &
+          d_{j,n} &= \left.\frac{\partial y^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} , \\
+          s^n_{k+j}(u^n_k) &\simeq \bar S_{j,n} + \alpha_{j,n}\,(u^n_k - \bar u^n) , &
+          \alpha_{j,n} &= \left.\frac{\partial s^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n} .
         \end{aligned}
         \tag*{[L,~(6)]}
         \]
@@ -308,10 +308,11 @@ sottinteso.
   \item \emph{Derivata dell'uscita} (esatta), con i parametri letti in
         $s_{k+j}$:
         \[
-          D_j = V_{oc}'\,\alpha_j - \beta_j - R_o'\,\alpha_j\, I - R_o ,
-          \qquad E_j = \alpha_j .
+          d_j = V_{oc}'\,\alpha_j - \beta_j - R_o'\,\alpha_j\, I - R_o .
           \tag*{[L,~(9)]}
         \]
+        Il coefficiente di sensibilità del SOC è $\alpha_j$ stesso: $\alpha$,
+        $\beta$ e $d$ sono i coefficienti di sensibilità di $s$, $V_p$ e $y$.
         Sono le derivate esatte del modello discreto, e coincidono con Eulero
         applicato alle equazioni di sensibilità a tempo continuo,
         [L,~(C5)--(C8)]: la linearizzazione non aggiunge un secondo errore di
@@ -319,12 +320,12 @@ sottinteso.
   \item \emph{Risposta libera e risposta forzata} (riscrittura esatta della
         [L,~(6)]):
         \[
-          y^n_{k+j}(u^n_k) \simeq Y^\lib_{j,n} + D_{j,n}\,u^n_k , \qquad
-          Y^\lib_{j,n} = \bar Y_{j,n} - D_{j,n}\,\bar u^n ,
+          y^n_{k+j}(u^n_k) \simeq Y^\lib_{j,n} + d_{j,n}\,u^n_k , \qquad
+          Y^\lib_{j,n} = \bar Y_{j,n} - d_{j,n}\,\bar u^n ,
           \tag*{[L,~(10)]}
         \]
-        e allo stesso modo $s^n_{k+j}(u^n_k) \simeq S^\lib_{j,n} + E_{j,n}\,u^n_k$,
-        con $S^\lib_{j,n} = \bar S_{j,n} - E_{j,n}\,\bar u^n$. $Y^\lib_{j,n}$ è
+        e allo stesso modo $s^n_{k+j}(u^n_k) \simeq S^\lib_{j,n} + \alpha_{j,n}\,u^n_k$,
+        con $S^\lib_{j,n} = \bar S_{j,n} - \alpha_{j,n}\,\bar u^n$. $Y^\lib_{j,n}$ è
         il valore della retta della cella $n$ in $u^n_k = 0$; non va confusa
         con $y^0_{k+j}$, la tensione della cella nominale.
 \end{itemize}
@@ -335,13 +336,13 @@ sottinteso.
 \begin{itemize}
   \item \emph{Incognite.}
         \[
-          z = \begin{bmatrix} u_k \\ \varepsilon \\ e \end{bmatrix} \in \mathbb{R}^{n_z},
+          z = \begin{bmatrix} u_k \\ \varepsilon \\ \varepsilon_y \end{bmatrix} \in \mathbb{R}^{n_z},
           \qquad n_z = N + n_\varepsilon + 1 ,
         \]
         con $u_k \in \mathbb{R}^N$ le correnti, $\varepsilon \in
         \mathbb{R}^{n_\varepsilon}$ le variabili ausiliarie del costo
         ($n_\varepsilon = 0$ per $J_t$, $p$ per $J_m$, $2p$ per $J_\Delta$;
-        sezione~\ref{sec:costo}) ed $e$ la variabile che allenta il vincolo di
+        sezione~\ref{sec:costo}) ed $\varepsilon_y$ la variabile che allenta il vincolo di
         tensione (sezione~\ref{sec:morbido}).
   \item \emph{Forma di \texttt{quadprog}}:
         \[
@@ -349,10 +350,10 @@ sottinteso.
           \qquad \text{con} \qquad A z \le b , \quad A_{eq}\, z = b_{eq} .
         \]
   \item \emph{Regola di lettura} (esatta; {\rifq}, sezione~2.2). Se il costo
-        contiene $a\,z_i^2$, allora $H_{ii} = 2a$; se contiene $g\,z_i$,
-        allora $f_i = g$; le costanti si scartano, perché non spostano il
-        punto di minimo. Nei costi che seguono non compaiono prodotti
-        $z_i z_l$ con $i \ne l$, quindi $H$ è diagonale.
+        contiene $a\,z_\ell^2$, allora $H_{\ell\ell} = 2a$; se contiene
+        $g\,z_\ell$, allora $f_\ell = g$; le costanti si scartano, perché non
+        spostano il punto di minimo. Nei costi che seguono non compaiono
+        prodotti $z_\ell z_{\ell'}$ con $\ell \ne \ell'$, quindi $H$ è diagonale.
 \end{itemize}
 
 % ---------------------------------------------------------------------------
@@ -360,24 +361,25 @@ sottinteso.
 
 \begin{itemize}
   \item[\ip{14}] \emph{Vincolo morbido.} Il vincolo eq.~6e è allentato da
-        un'incognita $e \ge 0$, pagata nel costo con un peso $W \gg \rho$ (nel
+        un'incognita $\varepsilon_y \ge 0$, pagata nel costo con un peso $W \gg \rho$ (nel
         progetto $W = 10^3$):
         \[
-          y^n_{k+j}(u^n_k) + e \ge y_{\min} , \qquad e \ge 0 , \qquad
-          \text{costo} \;+\; W e^2 .
+          y^n_{k+j}(u^n_k) + \varepsilon_y \ge y_{\min} , \qquad \varepsilon_y \ge 0 , \qquad
+          \text{costo} \;+\; W \varepsilon_y^2 .
           \tag*{eq.~17}
         \]
-        Il problema ha così sempre punti ammissibili, e nella soluzione $e$
+        Il problema ha così sempre punti ammissibili, e nella soluzione $\varepsilon_y$
         è la violazione peggiore della predizione:
         \[
-          e = \max\Bigl(0,\; \max_{j,n}\, \bigl(y_{\min} - y^n_{k+j}\bigr)\Bigr) .
+          \varepsilon_y = \max\Bigl(0,\; \max_{j,n}\, \bigl(y_{\min} - y^n_{k+j}\bigr)\Bigr) .
         \]
         Il vincolo morbido non è del tutto equivalente a quello rigido: quando una tensione si
         fermerebbe esattamente a $y_{\min}$, si accetta una piccola violazione,
-        inversamente proporzionale a $W$. Nel modello $e$ è sempre presente;
+        inversamente proporzionale a $W$. Nel modello $\varepsilon_y$ è sempre presente;
         il paper la introduce solo quando il problema rigido non ha soluzione.
   \item \emph{Contributo al costo} (regola della sezione~\ref{sec:forma}):
-        $H_{ee} = 2W$, dove $H_{ee}$ è l'ultimo elemento della diagonale.
+        $H_{\varepsilon_y\varepsilon_y} = 2W$, dove
+        $H_{\varepsilon_y\varepsilon_y}$ è l'ultimo elemento della diagonale.
 \end{itemize}
 
 % ---------------------------------------------------------------------------
@@ -393,30 +395,30 @@ sottinteso.
 \begin{itemize}
   \item \emph{Sostituire la retta} (approssimato, per la [L,~(10)]):
         \[
-          y^n_{k+j} - y^0_{k+j} \simeq D_{j,n}\,u^n_k + c_{j,n} , \qquad
+          y^n_{k+j} - y^0_{k+j} \simeq d_{j,n}\,u^n_k + c_{j,n} , \qquad
           c_{j,n} = Y^\lib_{j,n} - y^0_{k+j} ,
         \]
         \[
           J_t(u_k) \simeq \sum_{j=1}^{p}\sum_{n=1}^{N}
-                     \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2
+                     \bigl(d_{j,n}\,u^n_k + c_{j,n}\bigr)^2
                      + \rho \sum_{n=1}^{N} (u^n_k)^2 .
           \tag*{[L,~(Q1)]}
         \]
   \item \emph{Separare le celle} (esatto: si scambiano due somme finite):
         \[
           J_t(u_k) = \sum_{n=1}^{N} J^n(u^n_k) , \qquad
-          J^n(u^n_k) = \sum_{j=1}^{p} \bigl(D_{j,n}\,u^n_k + c_{j,n}\bigr)^2
+          J^n(u^n_k) = \sum_{j=1}^{p} \bigl(d_{j,n}\,u^n_k + c_{j,n}\bigr)^2
                        + \rho\,(u^n_k)^2 .
           \tag*{[L,~(Q2)]}
         \]
         Non ci sono prodotti misti $u^n_k u^m_k$: il blocco delle correnti in
         $H$ è diagonale, e le celle sono accoppiate solo da
         $\sum_n u^n_k = 0$.
-  \item \emph{Sviluppare il quadrato} (esatto; $D_j$, $c_j$ e $u$ stanno per
-        $D_{j,n}$, $c_{j,n}$ e $u^n_k$):
+  \item \emph{Sviluppare il quadrato} (esatto; $d_j$, $c_j$ e $u$ stanno per
+        $d_{j,n}$, $c_{j,n}$ e $u^n_k$):
         \[
-          J^n(u) = \Bigl(\sum_{j=1}^{p} D_j^2 + \rho\Bigr) u^2
-                 + \Bigl(2\sum_{j=1}^{p} D_j\,c_j\Bigr) u
+          J^n(u) = \Bigl(\sum_{j=1}^{p} d_j^2 + \rho\Bigr) u^2
+                 + \Bigl(2\sum_{j=1}^{p} d_j\,c_j\Bigr) u
                  + \sum_{j=1}^{p} c_j^2 .
           \tag*{[L,~(Q3)]}
         \]
@@ -424,8 +426,8 @@ sottinteso.
         $u$ sia nella costante: si scarta solo la costante.
   \item \emph{Coefficienti del QP} (regola della sezione~\ref{sec:forma}):
         \[
-          H_{nn} = 2\sum_{j=1}^{p} D_{j,n}^2 + 2\rho , \qquad
-          f_n = 2\sum_{j=1}^{p} D_{j,n}\,\bigl(Y^\lib_{j,n} - y^0_{k+j}\bigr) .
+          H_{nn} = 2\sum_{j=1}^{p} d_{j,n}^2 + 2\rho , \qquad
+          f_n = 2\sum_{j=1}^{p} d_{j,n}\,\bigl(Y^\lib_{j,n} - y^0_{k+j}\bigr) .
           \tag*{[L,~(11)]}
         \]
 \end{itemize}
@@ -435,8 +437,8 @@ sottinteso.
   \item \emph{Riformulazione con minoranti} (esatta; eq.~9--10, Remark~2).
         Per ogni passo si introduce un'incognita $\varepsilon_j$:
         \[
-          \min_{u_k,\,\varepsilon,\,e} \; -\sum_{j=1}^{p} \varepsilon_j
-             + \rho\, u_k^\top u_k + W e^2
+          \min_{u_k,\,\varepsilon,\,\varepsilon_y} \; -\sum_{j=1}^{p} \varepsilon_j
+             + \rho\, u_k^\top u_k + W \varepsilon_y^2
           \qquad \text{con} \qquad
           \varepsilon_j \le y^n_{k+j}(u^n_k) \quad \text{per ogni } j, n .
         \]
@@ -452,8 +454,8 @@ sottinteso.
   \item \emph{Riformulazione con minoranti e maggioranti} (esatta;
         eq.~12--13):
         \[
-          \min_{u_k,\,\varepsilon,\,e} \; \sum_{j=1}^{p} \varepsilon_{p+j}
-             - \sum_{j=1}^{p} \varepsilon_j + \rho\, u_k^\top u_k + W e^2
+          \min_{u_k,\,\varepsilon,\,\varepsilon_y} \; \sum_{j=1}^{p} \varepsilon_{p+j}
+             - \sum_{j=1}^{p} \varepsilon_j + \rho\, u_k^\top u_k + W \varepsilon_y^2
           \qquad \text{con} \qquad
           \varepsilon_j \le y^n_{k+j}(u^n_k) \le \varepsilon_{p+j} .
         \]
@@ -471,24 +473,24 @@ sottinteso.
   \item \emph{Sostituire la retta} (approssimato, per la [L,~(10)]) e portare
         le incognite a sinistra. Per $j = 1, \dots, p$ e $n = 1, \dots, N$:
         \begin{align*}
-          -D_{j,n}\,u^n_k - e &\le Y^\lib_{j,n} - y_{\min}
+          -d_{j,n}\,u^n_k - \varepsilon_y &\le Y^\lib_{j,n} - y_{\min}
              && \text{tensione minima} \tag*{[L,~(12)]}\\
-          \varepsilon_j - D_{j,n}\,u^n_k &\le Y^\lib_{j,n}
+          \varepsilon_j - d_{j,n}\,u^n_k &\le Y^\lib_{j,n}
              && \text{minoranti, } J_m \text{ e } J_\Delta \tag*{[L,~(13)]}\\
-          D_{j,n}\,u^n_k - \varepsilon_{p+j} &\le -Y^\lib_{j,n}
+          d_{j,n}\,u^n_k - \varepsilon_{p+j} &\le -Y^\lib_{j,n}
              && \text{maggioranti, } J_\Delta \tag*{[L,~(14)]}\\
           u_{\min} \le u^n_k &\le u_{\max}
              && \text{limiti del bilanciatore} \tag*{[L,~(15)]}\\
-          -e &\le 0 \tag*{[L,~(16)]}\\
+          -\varepsilon_y &\le 0 \tag*{[L,~(16)]}\\
           \textstyle\sum_{n=1}^{N} u^n_k &= 0
              && \text{unico vincolo di uguaglianza} \tag*{[L,~(17)]}
         \end{align*}
         Sono le righe di $A z \le b$ e di $A_{eq}\, z = b_{eq}$; il vincolo
         doppio sui limiti dà due righe per cella.
   \item \emph{Se si bilancia il SOC} ($\sigma = s$). Nel costo e nei vincoli
-        sulle $\varepsilon$ si usano $S^\lib_{j,n}$, $E_{j,n}$ e $s^0_{k+j}$
-        al posto di $Y^\lib_{j,n}$, $D_{j,n}$ e $y^0_{k+j}$; il vincolo di
-        tensione minima usa sempre $Y^\lib_{j,n}$ e $D_{j,n}$.
+        sulle $\varepsilon$ si usano $S^\lib_{j,n}$, $\alpha_{j,n}$ e $s^0_{k+j}$
+        al posto di $Y^\lib_{j,n}$, $d_{j,n}$ e $y^0_{k+j}$; il vincolo di
+        tensione minima usa sempre $Y^\lib_{j,n}$ e $d_{j,n}$.
 \end{itemize}
 
 % ---------------------------------------------------------------------------
@@ -506,7 +508,7 @@ sottinteso.
           \qquad
           H_{nn} =
           \begin{cases}
-            2\sum_j D_{j,n}^2 + 2\rho & \text{per } J_t , \\[2pt]
+            2\sum_j d_{j,n}^2 + 2\rho & \text{per } J_t , \\[2pt]
             2\rho & \text{per } J_m \text{ e } J_\Delta .
           \end{cases}
         \]
@@ -516,16 +518,16 @@ sottinteso.
         soluzione esiste ed è unica.
   \item \emph{Punto di partenza.} In $u_k = \bar u$ la retta coincide con la
         traiettoria di linearizzazione, e $\bar u = u_{k-1}$ rispetta già
-        limiti e somma nulla. Un punto ammissibile $z_0$ è quindi
+        limiti e somma nulla. Un punto ammissibile $z_{\mathrm{iniz}}$ è quindi
         \[
           u_k = \bar u , \qquad
           \varepsilon_j = \min_n \bar Y_{j,n} , \qquad
           \varepsilon_{p+j} = \max_n \bar Y_{j,n} , \qquad
-          e = \max\bigl(0,\; y_{\min} - \min_{j,n} \bar Y_{j,n}\bigr) ,
+          \varepsilon_y = \max\bigl(0,\; y_{\min} - \min_{j,n} \bar Y_{j,n}\bigr) ,
         \]
         con le $\varepsilon$ solo dove il costo le prevede. \texttt{quadprog}
-        (algoritmo \texttt{active-set}) parte da $z_0$; se non trova una
-        soluzione restituisce $z_0$, cioè mantiene la mossa precedente.
+        (algoritmo \texttt{active-set}) parte da $z_{\mathrm{iniz}}$; se non trova una
+        soluzione restituisce $z_{\mathrm{iniz}}$, cioè mantiene la mossa precedente.
   \item \emph{Applicazione.} Al pacco si applicano per un passo le prime $N$
         componenti della soluzione, $u_k$; $u_k$ diventa il punto di
         linearizzazione $\bar u$ del passo successivo.
@@ -565,10 +567,10 @@ H9  & Bilanciatore senza perdite e con correnti limitate &
 H10 & $R = \rho\, I_N$ & $H_{nn}$ & progetto \\
 H11 & Cella nominale come riferimento & $c_{j,n}$ e $f_n$ di $J_t$ &
       progetto \\
-H12 & $\bar u = u_{k-1}$ & $\bar Y$, $\bar S$, $D$, $E$, $z_0$ &
+H12 & $\bar u = u_{k-1}$ & $\bar Y$, $\bar S$, $d$, $\alpha$, $z_{\mathrm{iniz}}$ &
       linearizzazione \\
-H13 & Predizione derivabile in $\bar u$ & $D$, $E$ & linearizzazione \\
-H14 & Vincolo di tensione morbido & $e$, $H_{ee}$, [L,~(12)] &
+H13 & Predizione derivabile in $\bar u$ & $d$, $\alpha$ & linearizzazione \\
+H14 & Vincolo di tensione morbido & $\varepsilon_y$, $H_{\varepsilon_y\varepsilon_y}$, [L,~(12)] &
       rilassamento \\
 H15 & Una linearizzazione per passo & ciclo di controllo &
       linearizzazione \\

@@ -20,14 +20,14 @@ titoli  = {'Scenario A (E costante)', 'Scenario B (E a gradini)'};
 uscita = fullfile(cartella, 'risultati');
 if ~exist(uscita, 'dir'), mkdir(uscita); end
 
-for k = 1:numel(scenari)
-    base = simula_pacco('nessuno', pacco, par, scenari{k}, p);
-    mpc  = simula_pacco(tipo,      pacco, par, scenari{k}, p);
+for indice_scenario = 1:numel(scenari)
+    ris_base = simula_pacco('nessuno', pacco, par, scenari{indice_scenario}, p);
+    ris_mpc  = simula_pacco(tipo,      pacco, par, scenari{indice_scenario}, p);
 
-    fprintf('%s: senza controllo %.0f s, con MPC %s %.0f s (+%.2f %%)\n', titoli{k}, ...
-        base.durata, tipo, mpc.durata, 100*(mpc.durata/base.durata - 1));
+    fprintf('%s: senza controllo %.0f s, con MPC %s %.0f s (+%.2f %%)\n', titoli{indice_scenario}, ...
+        ris_base.durata, tipo, ris_mpc.durata, 100*(ris_mpc.durata/ris_base.durata - 1));
 
-    fig = grafico_scarica(base, mpc, par, [titoli{k} ': scarica senza controllo e con MPC']);
-    exportgraphics(fig, fullfile(uscita, sprintf('%s_scarica_%s.png', nomi{k}, tipo)), ...
+    fig = grafico_scarica(ris_base, ris_mpc, par, [titoli{indice_scenario} ': scarica senza controllo e con MPC']);
+    exportgraphics(fig, fullfile(uscita, sprintf('%s_scarica_%s.png', nomi{indice_scenario}, tipo)), ...
         'Resolution', 150);
 end

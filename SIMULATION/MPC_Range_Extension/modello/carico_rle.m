@@ -1,23 +1,23 @@
-function I_pacco_dopo = carico_rle(pacco, par, SOC, V_pol, I_bilanciamento, I_pacco, E, passo)
+function i_pacco_next = carico_rle(pacco, par, s, Vp, u, i_pacco, E, Tc)
 %CARICO_RLE  Corrente di pacco dopo un passo, con carico R-L-E in serie.
 %
-%   L*dI/dt = V_pacco - R*I - E,   V_pacco = somma delle tensioni di cella
+%   L*di_pacco/dt = V_pacco - R*i_pacco - E,   V_pacco = somma delle tensioni di cella
 %
-% I_pacco e' la corrente comune a tutte le celle (positiva in scarica),
-% I_bilanciamento quella aggiunta a ogni cella dal bilanciatore, E la f.e.m.
-% del carico. Soluzione esatta sul passo con E e stati di cella costanti: la
-% corrente tende a quella di regime con costante di tempo L/R_totale. E'
-% stabile anche quando L/R_totale e' molto minore del passo.
+% i_pacco e' la corrente comune a tutte le celle (positiva in scarica), u la
+% corrente di bilanciamento di ogni cella, E la f.e.m. del carico. Soluzione
+% esatta sul passo con E e stati di cella costanti: la corrente tende a quella
+% di regime con costante di tempo L/R_tot. E' stabile anche quando L/R_tot e'
+% molto minore del passo.
 
-[V_vuoto, R_serie] = parametri_cella(pacco, SOC);
+[Voc, Ro] = parametri_cella(pacco, s);
 
 % Tensione di pacco a corrente di carico nulla e resistenza totale della maglia
-V_interna = sum(V_vuoto - V_pol - R_serie .* I_bilanciamento);
-R_totale  = par.carico.R + sum(R_serie);
+V_int = sum(Voc - Vp - Ro .* u);
+R_tot = par.carico.R + sum(Ro);
 
-% Negativa se E > V_interna: il carico ricarica il pacco
-I_regime = (V_interna - E) / R_totale;
+% Negativa se E > V_int: il carico ricarica il pacco
+i_pacco_regime = (V_int - E) / R_tot;
 
-I_pacco_dopo = I_regime + (I_pacco - I_regime) * exp(-passo * R_totale / par.carico.L);
+i_pacco_next = i_pacco_regime + (i_pacco - i_pacco_regime) * exp(-Tc * R_tot / par.carico.L);
 
 end

@@ -20,7 +20,7 @@ function esempio_sensibilita_ode45
 % Lo script:
 %   1) integra insieme stato e derivate con la forza F
 %   2) con S predice la traiettoria che si avrebbe con un'altra forza,
-%      senza integrare di nuovo:  x(t) + S(t)*dF
+%      senza integrare di nuovo:  x(t) + S(t)*delta_F
 %   3) la confronta con la traiettoria vera, integrata con la nuova forza
 
 %% Coefficienti del sistema
@@ -43,21 +43,21 @@ z0 = [x0; 0; 0];
 x1 = z(:, 1);       x2 = z(:, 2);
 S1 = z(:, 3);       S2 = z(:, 4);
 
-%% 2) Predizione al primo ordine con un'altra forza, F + dF
-dF = 3;
-x1_predetto = x1 + S1*dF;
-x2_predetto = x2 + S2*dF;
+%% 2) Predizione al primo ordine con un'altra forza, F + delta_F
+delta_F = 3;
+x1_predetto = x1 + S1*delta_F;
+x2_predetto = x2 + S2*delta_F;
 
 %% 3) Traiettoria vera con la nuova forza
-[~, z] = ode45(@(t, z) stato_e_derivate(z, F + dF, m, k, c0, c1), t, z0, opzioni);
+[~, z] = ode45(@(t, z) stato_e_derivate(z, F + delta_F, m, k, c0, c1), t, z0, opzioni);
 x1_vero = z(:, 1);
 x2_vero = z(:, 2);
 
-fprintf('Con dF = %.2f, scarto massimo tra predizione al primo ordine e traiettoria vera:\n', dF);
+fprintf('Con delta_F = %.2f, scarto massimo tra predizione al primo ordine e traiettoria vera:\n', delta_F);
 fprintf('   x1  %.2e      x2  %.2e\n', max(abs(x1_predetto - x1_vero)), max(abs(x2_predetto - x2_vero)));
 
-% La retta vale vicino al punto di linearizzazione: lo scarto cresce con dF
-fprintf('\n     dF      scarto massimo su x1\n');
+% La retta vale vicino al punto di linearizzazione: lo scarto cresce con delta_F
+fprintf('\n     delta_F      scarto massimo su x1\n');
 for prova = [0.1 0.5 1 2]
     [~, z] = ode45(@(t, z) stato_e_derivate(z, F + prova, m, k, c0, c1), t, z0, opzioni);
     fprintf('   %5.2f      %.2e\n', prova, max(abs(x1 + S1*prova - z(:, 1))));
@@ -79,40 +79,40 @@ title('Derivata parametrica della velocita''')
 subplot(2, 2, 3)
 plot(t, x1, 'k', t, x1_vero, 'b', t, x1_predetto, 'r--', 'LineWidth', 1.2), grid on
 xlabel('t'), ylabel('x_1')
-legend(sprintf('con F = %g', F), sprintf('vera con F = %g', F + dF), ...
+legend(sprintf('con F = %g', F), sprintf('vera con F = %g', F + delta_F), ...
     'predetta con S_1', 'Location', 'southeast')
 title('Posizione')
 
 subplot(2, 2, 4)
 plot(t, x2, 'k', t, x2_vero, 'b', t, x2_predetto, 'r--', 'LineWidth', 1.2), grid on
 xlabel('t'), ylabel('x_2')
-legend(sprintf('con F = %g', F), sprintf('vera con F = %g', F + dF), ...
+legend(sprintf('con F = %g', F), sprintf('vera con F = %g', F + delta_F), ...
     'predetta con S_2', 'Location', 'northeast')
 title('Velocita''')
 
 end
 
-function zdot = stato_e_derivate(z, F, m, k, c0, c1)
+function dt_z = stato_e_derivate(z, F, m, k, c0, c1)
 % Secondo membro del sistema aumentato: stato x e derivate parametriche S.
 x = z(1:2);
 S = z(3:4);
 
 % Coefficiente che dipende dallo stato, e sua derivata rispetto a x1
 c      = c0 + c1*x(1)^2;
-dc_dx1 = 2*c1*x(1);
+dx1_c = 2*c1*x(1);
 
 % Stato: dx/dt = f(x, F) 
-xdot = [x(2); ...
+dt_x = [x(2); ...
      (F - k*x(1) - c*x(2)) / m];
 
 % Jacobiane di f, valutate nello stato attuale
-df_dx = [ 0,                        1; ...
-         -(k + dc_dx1*x(2)) / m,   -c / m];
-df_dF = [0; ...
+dx_f = [ 0,                        1; ...
+         -(k + dx1_c*x(2)) / m,   -c / m];
+dF_f = [0; ...
          1 / m];
 
 % Derivate parametriche: dS/dt = (df/dx)*S + df/dF
-Sdot = df_dx*S + df_dF;
+dt_S = dx_f*S + dF_f;
 
-zdot = [xdot; Sdot];
+dt_z = [dt_x; dt_S];
 end

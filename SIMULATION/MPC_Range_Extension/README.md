@@ -20,33 +20,35 @@ Dalla cartella `MPC_Range_Extension`:
 
 Tabelle a schermo; figure e dati in `risultati/`. Tutti i parametri sono in `init_parametri.m`.
 
+Simboli e nomi delle variabili seguono [`DOCUMENTS/Notazione.md`](../../DOCUMENTS/Notazione.md): un solo nome per grandezza, nel paper, nei documenti, nel codice e nel modello Simulink.
+
 ## File
 
 | File | Contenuto | Paper |
 |---|---|---|
 | `init_parametri.m` | Tutti i parametri: cella a 20 °C, pacco, MPC, carico, scenari | — |
 | `modello/genera_pacco.m` | N celle con parametri deviati casualmente | Sez. IV |
-| `modello/parametri_cella.m` | `V_vuoto`, `R_serie`, `R_pol`, `C_pol` al SOC corrente, con derivate | — |
-| `modello/modello_cella.m` | Tensione di cella e stato (SOC, `V_pol`) dopo un passo | eq. (2a)-(2c) |
-| `modello/carico_rle.m` | Corrente di pacco con carico R–L–E | — |
+| `modello/parametri_cella.m` | `Voc`, `Ro`, `Rp`, `Cp` al SOC corrente, con le derivate rispetto al SOC (`ds.Voc`, …) | — |
+| `modello/modello_cella.m` | Tensione di cella `y` e stato (`s`, `Vp`) dopo un passo | eq. (2a)-(2c) |
+| `modello/carico_rle.m` | Corrente di pacco `i_pacco` con carico R–L–E | — |
 | `mpc/crea_mpc.m` | Oggetto `nlmpc` per `Jt`, `Jm`, `Jdelta`: stati, variabili manipolate, limiti, costo e vincoli | eq. (6) |
 | `mpc/mpc_bilanciamento.m` | Un passo di controllo con `nlmpcmove` | eq. (6) |
-| `mpc/stato_pacco.m` | Funzione di stato del modello di predizione | eq. (4a), (6b) |
+| `mpc/zeta_next.m` | Funzione di stato del modello di predizione: lo stato del pacco `ζ = [s; Vp]` dopo un passo | eq. (4a), (6b) |
 | `mpc/predizione_uscite.m` | Tensioni e SOC predetti sull'orizzonte | eq. (6c) |
 | `mpc/costo_bilanciamento.m` | Funzione di costo delle tre formulazioni | eq. (7), (9), (12), (17) |
-| `mpc/vincoli_disuguaglianza.m` | Vincolo di tensione e vincoli sulle slack | eq. (6e), (10), (13), (17) |
+| `mpc/vincoli_disuguaglianza.m` | Vincolo di tensione e vincoli sulle variabili ausiliarie `ε` | eq. (6e), (10), (13), (17) |
 | `mpc/vincolo_somma.m` | Somma nulla delle correnti di bilanciamento | eq. (6f) |
 | `mpc/jacobiano_stato.m` | Derivate della funzione di stato | Remark 3 |
-| `mpc/traiettoria_nominale.m` | Riferimento della cella nominale | eq. (7) |
+| `mpc/cella_nominale.m` | Riferimento `σ⁰` della cella nominale | eq. (7) |
 | `simulazione/simula_pacco.m` | Anello chiuso fino al cedimento | eq. (5) |
 | `simulazione/profilo_E.m` | F.e.m. del carico nel tempo | — |
 | `grafici/` | Figure e colori | Fig. 2–5 |
 
 ## Modello
 
-- **Cella**: circuito equivalente a un ramo RC, stato `[s; V_p]`, parametri funzione del SOC. Corrente positiva = scarica.
-- **Bilanciatore**: ideale, una corrente `u^n` per cella con `Σ u^n = 0` e `|u^n| ≤ 2 A`. La corrente della cella `n` è `i + u^n`. Rispetto a `Modello_semplificato.slx`, `u^n = −I_bal,n`.
-- **Carico**: `R`, `L` e f.e.m. `E(t)` in serie al pacco, `L·di/dt = V_pacco − R·i − E`. Con `E > V_pacco` la corrente è negativa e ricarica il pacco. L'MPC misura `i` e la tiene costante sull'orizzonte.
+- **Cella**: circuito equivalente a un ramo RC, stato `ζ = [s; Vp]` (SOC e tensione di polarizzazione), parametri funzione del SOC. Corrente positiva = scarica.
+- **Bilanciatore**: ideale, una corrente `u^n` per cella con `Σ u^n = 0` e `|u^n| ≤ 2 A`. La corrente della cella `n` è `I^n = i + u^n` (nel codice `I_cella = i_pacco + u`). Rispetto a `Modello_semplificato.slx`, `u^n = −I_bal,n`.
+- **Carico**: `R`, `L` e f.e.m. `E(t)` in serie al pacco, `L·di/dt = V_pacco − R·i − E`. Con `E > V_pacco` la corrente è negativa e ricarica il pacco. L'MPC misura la corrente di pacco `i` (nel codice `i_pacco`) e la tiene costante sull'orizzonte.
 - **Cedimento**: la simulazione si ferma quando una cella scende sotto `y_min`.
 
 ## Modello Simulink
@@ -57,12 +59,14 @@ Tabelle a schermo; figure e dati in `risultati/`. Tutti i parametri sono in `ini
 
 | Cosa | Come |
 |---|---|
-| Aprire e simulare a mano | Aprire `Bilanciamento_MPC.slx` e premere Run. All'apertura il modello crea da solo la struct `sl` con i parametri di `init_parametri.m`, `J_t` e scenario A |
+| Aprire e simulare a mano | Aprire `Bilanciamento_MPC.slx` e premere Run. All'apertura il modello crea da solo la struct `par_sim` con i parametri della simulazione (`parametri_simulazione.m`, da `init_parametri.m`, `J_t` e scenario A) |
 | Cambiare formulazione, scenario o orizzonte | Modificare le prime righe di `avvio_simulink.m` ed eseguirlo, poi Run |
 | Confronto dei quattro casi (stile Tabella I) | `main_simulink`: tabella a schermo, figure `risultati/SL_*.png` |
 | Controllo contro il codice MATLAB | `verifica_simulink`: riesegue i casi di `risultati/A_risultati.mat` e stampa le differenze |
 
 `simula_simulink(tipo, pacco, par, scen, p)` ha gli stessi ingressi e la stessa uscita di `simula_pacco`: le funzioni in `grafici/` funzionano con entrambe.
+
+`par_sim` contiene i numeri di una sola simulazione (una formulazione, uno scenario, un orizzonte), ricavati da `par`: sono parametri, non variabili della simulazione, e i blocchi li leggono come `par_sim.Tc`, `par_sim.rho`, `par_sim.pacco.phi.Ro`. Dopo una modifica a `init_parametri.m` basta rieseguire `avvio_simulink`, che la ricrea.
 
 ### Struttura
 
@@ -71,40 +75,42 @@ Il livello principale ha tre parti, collegate solo da Goto/From: due sottosistem
 | Parte | Contenuto | Legge | Fornisce |
 |---|---|---|---|
 | `Modello_fisico` | Carico, celle in serie, cedimento del pacco: eq. (1)-(5) | `correnti_bilanciamento` | `corrente_pacco`, `SOC_celle`, `tensioni_polarizzazione`, `tensioni_celle`, `tensione_minima` |
-| `Controllo` | MPC di bilanciamento: eq. (6)-(17) | `SOC_celle`, `tensioni_polarizzazione`, `corrente_pacco` | `correnti_bilanciamento`, `slack_tensione`, `riferimento_nominale`, `esito_solutore` |
-| Visualizzazione (blocchi al livello principale) | Scope e grandezze derivate, senza effetto sulla simulazione | tutti i segnali sopra tranne `tensioni_polarizzazione` e `corrente_pacco` | — |
+| `Controllo` | MPC di bilanciamento: eq. (6)-(17) | `SOC_celle`, `tensioni_polarizzazione`, `corrente_pacco`, campionati da `Campionamento_misure` | `correnti_bilanciamento`, `rilassamento_tensione`, `riferimento_nominale`, `esito_solutore` |
+| Visualizzazione (blocchi al livello principale) | Scope e grandezze derivate, senza effetto sulla simulazione | tutti i segnali sopra tranne `tensioni_polarizzazione` | — |
 
 **`Modello_fisico`**
 
 | Blocco | Cosa fa | Paper | File MATLAB corrispondente |
 |---|---|---|---|
-| `Profilo_E`, `Carico_RLE` | F.e.m. del carico e corrente di pacco `i` | — | `profilo_E.m`, `carico_rle.m` |
+| `Profilo_E`, `Carico_RLE` | F.e.m. del carico `E` (segnale `fem_carico`) e corrente di pacco `i` | — | `profilo_E.m`, `carico_rle.m` |
 | `Mantieni_bilanciamento` | Tiene costanti le correnti di bilanciamento tra due passi di controllo | — | — |
-| `Corrente_cella` | Corrente di ogni cella, `i + u^n` | eq. (3) | — |
-| `Pacco_batteria` | Le N celle: SOC, ramo RC, tensione, fatti con blocchi elementari | eq. (2a)-(2c), (4a) | `modello_cella.m` |
-| `Pacco_batteria/Parametri_cella` | Tabelle di `V_oc`, `R_o`, `R_p`, `C_p` in funzione del SOC, per il fattore di ogni cella | — | `parametri_cella.m` |
+| `Corrente_cella` | Corrente di ogni cella, `I^n = i + u^n` (segnale `correnti_celle`) | eq. (3) | — |
+| `Modello_cella` | Le N celle: SOC, ramo RC, tensione, fatti con blocchi elementari | eq. (2a)-(2c), (4a) | `modello_cella.m` |
+| `Modello_cella/Parametri_cella` | Tabelle di `V_oc`, `R_o`, `R_p`, `C_p` in funzione del SOC, per il fattore di deviazione `φ` di ogni cella | — | `parametri_cella.m` |
 | `Tensione_pacco` | Somma delle tensioni di cella | eq. (4b) | — |
-| `Cedimento` | Ferma la simulazione quando una cella scende sotto `y_min` (o il SOC si esaurisce) | eq. (5) | `simula_pacco.m` |
+| `Tensione_minima`, `Sotto_y_min`, `SOC_minimo`, `SOC_esaurito`, `Pacco_ceduto`, `Arresto` | Fermano la simulazione quando una cella scende sotto `y_min` (o il SOC si esaurisce) | eq. (5) | `simula_pacco.m` |
 
 **`Controllo`**: un passo dell'MPC è la catena
 
 | Blocco | Cosa fa | Paper | Codice |
 |---|---|---|---|
-| `Campiona_SOC`, `Campiona_polarizzazione`, `Campiona_corrente` | Leggono le misure a ogni passo di controllo | — | — |
-| `Cella_nominale` | Riferimento `σ⁰`: la cella nominale integrata su `p` passi dalla media degli stati | eq. (7) | `qp_cella_nominale.m` |
-| `Predizione_linearizzata` | Tensioni e SOC delle celle su `p` passi con `u = u_{k-1}`, e loro derivate rispetto a `u` | eq. (6b)-(6c), Remark 3 | `qp_predizione.m`, `qp_tabella.m` |
-| `Problema_QP` | Matrici `H`, `f`, `A`, `b`, `Aeq`, `beq` del QP nelle incognite `z = [u; ε; e]` | eq. (7), (9), (12); (6d)-(6f), (10), (13), (17) | `qp_problema.m` |
+| `Campionamento_misure` (livello principale, tra `Raccolta_misure` e `Separazione_misure`) | Campiona SOC, tensioni di polarizzazione e corrente di pacco a ogni passo di controllo `par_sim.Tc` | — | — |
+| `Mossa_precedente` | Memoria della mossa precedente `ū = u_{k-1}`, punto di linearizzazione | Remark 3 | — |
+| `Cella_nominale` | Riferimento `σ⁰`: la cella nominale integrata su `p` passi dalla media degli stati | eq. (7) | `cella_nominale_semplice.m` |
+| `Predizione_linearizzata` | Traiettoria di linearizzazione `Y_bar`, `S_bar` su `p` passi con `u = ū`, e coefficienti di sensibilità `d`, `alfa` (derivate rispetto a `u`) | eq. (6b)-(6c), Remark 3 | `qp_predizione.m`, `qp_tabella.m` |
+| `Problema_QP` | Matrici `H`, `f`, `A`, `b`, `Aeq`, `beq` del QP nelle incognite `z = [u; ε; ε_y]` e punto di partenza `z_iniziale` | eq. (7), (9), (12); (6d)-(6f), (10), (13), (17) | `qp_problema.m` |
 | `Solutore_QP` | `quadprog`; al pacco vanno solo le `N` correnti `u` | Sez. IV-A | `qp_solutore.m` |
-| `Bilanciamento_attivo` | Guadagno 0 o 1 (`sl.attivo`): con 0 il pacco lavora senza bilanciamento | — | `tipo = 'nessuno'` |
+| `Bilanciamento_attivo` | Guadagno 0 o 1 (`par_sim.attivo`): con 0 il pacco lavora senza bilanciamento | — | `tipo = 'nessuno'` |
 
 **Visualizzazione**
 
 | Blocco | Cosa mostra | Paper |
 |---|---|---|
 | `Celle_Fig2` | Tensioni, SOC e correnti di bilanciamento di ogni cella | Fig. 2 |
-| `Confronto_Fig3` | Tensione della cella più bassa e sforzo `e_k = u_k'·u_k` (quadrato e somma degli elementi) | Fig. 3 |
-| `MPC_interno` | Slack del vincolo di tensione, esito di `quadprog`, riferimento `σ⁰` | eq. (17), (7) |
+| `Confronto_Fig3` | Tensione della cella più bassa e sforzo di bilanciamento `w_k = u_kᵀ·u_k = Σ_n (u^n_k)²`, calcolato da `Quadrato_u` e `Sforzo_bilanciamento` (nel paper `e_k`) | Fig. 3 |
+| `MPC_interno` | Variabile di rilassamento `ε_y` del vincolo di tensione, esito di `quadprog`, riferimento `σ⁰` | eq. (17), (7) |
 | `Somma_u`, `Somma_u_nulla` | Verifica che la somma delle `u` resti nulla | eq. (6f) |
+| `Vista_corrente_pacco` | Corrente di pacco `i` | — |
 
 ### Passi di tempo
 
@@ -112,10 +118,10 @@ Il modello ha due passi, entrambi in `init_parametri.m`:
 
 | Parametro | Valore | Cosa regola |
 |---|---|---|
-| `par.sim.Ts_integrazione` | 1 s | Passo con cui avanza il modello fisico (celle e carico) e con cui si controlla il cedimento |
-| `par.mpc.Ts` | 20 s | Passo di controllo: l'MPC campiona le misure, predice su `p` di questi passi e sceglie le correnti di bilanciamento, che restano costanti fino al passo successivo |
+| `par.tempi.Tint` | 1 s | Passo di integrazione `T_int`: passo con cui avanza il modello fisico (celle e carico) e con cui si controlla il cedimento |
+| `par.mpc.Tc` | 20 s | Passo di controllo `T_c`: l'MPC campiona le misure, predice su `p` di questi passi e sceglie le correnti di bilanciamento, che restano costanti fino al passo successivo |
 
-`par.mpc.Ts` deve essere un multiplo intero di `par.sim.Ts_integrazione`. Il codice MATLAB (`simula_pacco`) usa un solo passo, `par.mpc.Ts`, per entrambe le cose: per riprodurlo esattamente in Simulink basta porre `par.sim.Ts_integrazione = par.mpc.Ts`.
+`par.mpc.Tc` deve essere un multiplo intero di `par.tempi.Tint`. Nel modello i due passi sono `par_sim.Tint` e `par_sim.Tc`. Il codice MATLAB (`simula_pacco`) usa un solo passo, `par.mpc.Tc`, per entrambe le cose: per riprodurlo esattamente in Simulink basta porre `par.tempi.Tint = par.mpc.Tc`.
 
 Scenario A con i parametri attuali (N = 3, p = 30, passo di controllo 20 s), durate in secondi:
 
@@ -130,17 +136,17 @@ Scenario A con i parametri attuali (N = 3, p = 30, passo di controllo 20 s), dur
 
 Il codice MATLAB risolve a ogni passo il problema non lineare con `nlmpc`. Il modello Simulink segue il Remark 3 del paper: linearizza la predizione attorno alla mossa precedente e risolve un QP con `quadprog`. Modello, costo e vincoli sono gli stessi.
 
-Confronto sullo scenario A con un solo passo (`Ts_integrazione = Ts`), durate in secondi:
+Confronto sullo scenario A con un solo passo (`Tint = Tc`), durate in secondi:
 
 | | `nlmpc` | Simulink | `nlmpc` | Simulink |
 |---|---|---|---|---|
-| | N = 5, Ts = 1 s, p = 5 | | N = 3, Ts = 20 s, p = 30 | |
+| | N = 5, Tc = 1 s, p = 5 | | N = 3, Tc = 20 s, p = 30 | |
 | nessuno | 2378 | 2378 | 8640 | 8640 |
 | `J_t` | 2529 | 2529 | 8120 | 8120 |
 | `J_m` | 2478 | 2478 | 8120 | 8120 |
 | `J_Δ` | 2488 | 2488 | 8120 | 8120 |
 
-Senza bilanciamento le due simulazioni coincidono alla precisione di macchina. Con l'MPC le correnti `u` differiscono al più di 4·10⁻³ A nel primo caso e di 0.3 A, in pochi passi isolati, nel secondo (orizzonte di 600 s: la linearizzazione pesa di più); lo sforzo medio differisce di meno dello 0.2 %.
+Senza bilanciamento le due simulazioni coincidono alla precisione di macchina. Con l'MPC le correnti `u` differiscono al più di 4·10⁻³ A nel primo caso e di 0.3 A, in pochi passi isolati, nel secondo (orizzonte di 600 s: la linearizzazione pesa di più); lo sforzo medio `w̄`, cioè la media sui passi dello sforzo di bilanciamento `w_k = u_kᵀ·u_k`, differisce di meno dello 0.2 %.
 
 ## Differenze rispetto al paper
 

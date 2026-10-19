@@ -8,11 +8,11 @@ function ctrl = crea_mpc(tipo, pacco, par, p)
 %          'Jdelta'  minimizzazione della differenza max-min, eq. (12)-(13)
 %
 % Struttura del controllore:
-%   stati               x  = [s; Vp]                 (2N, misurati)
-%   variabili manipolate mv = [u; eps]               (N correnti + slack del costo)
-%   disturbo misurato   md = corrente di pacco i     (costante sull'orizzonte)
+%   stato                zeta = [s; Vp]                  (2N, misurato)
+%   variabili manipolate mv   = [u; epsilon]             (N correnti + variabili ausiliarie del costo)
+%   disturbo misurato    md   = corrente di pacco i_pacco (costante sull'orizzonte)
 % L'orizzonte di controllo vale 1: u resta costante su tutta la predizione,
-% come nel paper. Le eps (p per Jm, 2p per Jdelta) sono una per passo.
+% come nel paper. Le epsilon (p per Jm, 2p per Jdelta) sono una per passo.
 
 % =========================================================================
 % =========================================================================
@@ -56,7 +56,7 @@ function ctrl = crea_mpc(tipo, pacco, par, p)
 %      posto di quadprog. Atteso circa 1 ms a passo.
 %      Contro: si perde l'oggetto nlmpc; entrambi i solutori vogliono un
 %      Hessiano definito positivo, quindi per J_m e J_Delta serve una
-%      piccola regolarizzazione sulle slack eps.
+%      piccola regolarizzazione sulle variabili ausiliarie epsilon.
 %
 %   2) TENERE nlmpc E COMPILARLO IN MEX
 %      Con MATLAB Coder (buildMEX / nlmpcmoveCodeGeneration). Sul PC ci
@@ -80,21 +80,21 @@ function ctrl = crea_mpc(tipo, pacco, par, p)
 % =========================================================================
 % =========================================================================
 
-N = pacco.numero_celle;
+N = pacco.N;
 switch tipo
-    case 'Jt',     n_eps = 0;
-    case 'Jm',     n_eps = p;
-    case 'Jdelta', n_eps = 2*p;
+    case 'Jt',     n_epsilon = 0;
+    case 'Jm',     n_epsilon = p;
+    case 'Jdelta', n_epsilon = 2*p;
 end
-n_mv = N + n_eps;
+n_mv = N + n_epsilon;
 
 nlobj = nlmpc(2*N, 2*N, 'MV', 1:n_mv, 'MD', n_mv + 1);
-nlobj.Ts                = par.mpc.Ts;
+nlobj.Ts                = par.mpc.Tc;
 nlobj.PredictionHorizon = p;
 nlobj.ControlHorizon    = 1;
 
 % Modello di predizione: eq. (2a)-(2b) a tempo discreto
-nlobj.Model.StateFcn           = @stato_pacco;
+nlobj.Model.StateFcn           = @zeta_next;
 nlobj.Model.IsContinuousTime   = false;
 nlobj.Model.NumberOfParameters = 1;
 
@@ -132,18 +132,18 @@ dati.sigma0 = zeros(p, 1);      % riferimento di Jt, aggiornato a ogni passo
 ctrl.nlobj = nlobj;
 ctrl.dati  = dati;
 ctrl.opt   = nlmpcmoveopt;
-ctrl.mv    = [];                % ultima mossa [u; eps], vuota al primo passo
+ctrl.mv    = [];                % ultima mossa [u; epsilon], vuota al primo passo
 
 end
 
 % Gli jacobiani sono le uscite successive alla prima delle funzioni di costo e
 % di vincolo.
-function [G, Gmv, Ge] = jacobiano_costo(X, U, e, data, dati)
-[~, G, Gmv, Ge] = costo_bilanciamento(X, U, e, data, dati);
+function [G, Gmv, G_epsilon_y] = jacobiano_costo(X, U, epsilon_y, data, dati)
+[~, G, Gmv, G_epsilon_y] = costo_bilanciamento(X, U, epsilon_y, data, dati);
 end
 
-function [G, Gmv, Ge] = jacobiano_disuguaglianza(X, U, e, data, dati)
-[~, G, Gmv, Ge] = vincoli_disuguaglianza(X, U, e, data, dati);
+function [G, Gmv, G_epsilon_y] = jacobiano_disuguaglianza(X, U, epsilon_y, data, dati)
+[~, G, Gmv, G_epsilon_y] = vincoli_disuguaglianza(X, U, epsilon_y, data, dati);
 end
 
 function [G, Gmv] = jacobiano_somma(X, U, data, dati)

@@ -1,0 +1,35 @@
+%% verifica_simulink.m
+% Controlla che il modello Simulink dia gli stessi risultati del codice MATLAB.
+%
+% Legge risultati/A_risultati.mat (scritto da main_E_costante, cioe' da
+% simula_pacco con nlmpc), riesegue gli stessi quattro casi con il modello
+% Simulink usando i parametri salvati nel file e stampa le differenze.
+% L'ultima colonna e' lo sforzo medio w (media di w_k = u_k'*u_k), MATLAB / Simulink.
+
+clear; clc
+cartella = fileparts(fileparts(mfilename('fullpath')));
+addpath(genpath(cartella));
+
+rif_matlab = load(fullfile(cartella, 'risultati', 'A_risultati.mat'));
+par        = rif_matlab.par;
+pacco      = rif_matlab.pacco;
+
+% simula_pacco usa un solo passo, par.mpc.Tc, anche per integrare il modello
+% fisico: per confrontare le due simulazioni istante per istante il modello
+% Simulink deve integrare con lo stesso passo
+par.tempi.Tint = par.mpc.Tc;
+
+fprintf('Tc = %g s, N = %d celle\n', par.mpc.Tc, pacco.N);
+fprintf('%-10s %3s %12s %12s %12s %12s %20s\n', 'Controllo', 'p', 'MATLAB [s]', ...
+    'Simulink [s]', 'max|du| [A]', 'max|dy| [V]', 'Sforzo medio w [A^2]');
+for c = 1:numel(rif_matlab.ris)
+    rif = rif_matlab.ris{c};
+    ris = simula_simulink(rif.tipo, pacco, par, par.scenarioA, rif.p);
+
+    K = min(numel(rif.t), numel(ris.t));          % passi in comune
+    fprintf('%-10s %3d %12.0f %12.0f %12.1e %12.1e %9.3f / %8.3f\n', rif.tipo, rif.p, ...
+        rif.durata, ris.durata, ...
+        max(abs(ris.u(1:K, :) - rif.u(1:K, :)), [], 'all'), ...
+        max(abs(ris.y(1:K, :) - rif.y(1:K, :)), [], 'all'), ...
+        rif.w_medio, ris.w_medio);
+end

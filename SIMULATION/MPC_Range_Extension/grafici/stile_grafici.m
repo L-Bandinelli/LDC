@@ -16,11 +16,13 @@ st.controllo.nessuno = [137 135 129] / 255;
 st.controllo.Jt      = st.celle(1, :);
 st.controllo.Jm      = st.celle(2, :);
 st.controllo.Jdelta  = st.celle(3, :);
+st.controllo.Jt_rigido = st.celle(7, :);     % J_t con il vincolo di tensione rigido (simulink/Jt)
 
 st.nome.nessuno = 'Senza bilanciamento';
 st.nome.Jt      = 'J_t';
 st.nome.Jm      = 'J_m';
 st.nome.Jdelta  = 'J_\Delta';
+st.nome.Jt_rigido = 'J_t, vincolo rigido';
 
 st.sfondo  = [252 252 251] / 255;
 st.griglia = [225 224 217] / 255;
