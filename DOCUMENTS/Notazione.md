@@ -4,7 +4,7 @@ Dizionario dei simboli e dei nomi dell'MPC di bilanciamento attivo. Vale per:
 
 - il paper di Chen, Behal e Li, *Active Cell Balancing by Model Predictive Control for Real Time Range Extension*, IEEE CDC 2021 (`BMS/`);
 - i documenti [`Linearizzazione_MPC.pdf`](Linearizzazione_MPC.pdf) [L], [`Problema_QP_MPC.pdf`](Problema_QP_MPC.pdf) [Q], [`Passaggi_formulazione_MPC.pdf`](Passaggi_formulazione_MPC.pdf) [P] e [`Variabilita_tra_Celle_MPC.md`](Variabilita_tra_Celle_MPC.md);
-- il codice MATLAB di [`SIMULATION/MPC_Range_Extension/`](../SIMULATION/MPC_Range_Extension/) e il modello `simulink/Bilanciamento_MPC.slx`.
+- il codice MATLAB di [`SIMULATION/MPC_Range_Extension/`](../SIMULATION/MPC_Range_Extension/) e il modello `Bilanciamento_MPC_Jt.slx` (con le versioni precedenti in `versioni_precedenti/`).
 
 È l'unico posto in cui un simbolo è definito, e ogni simbolo ha **un solo significato**. I documenti sui condensatori commutati (`01_…`–`07_…`, `Guida_…`, `Analisi_…`) non sono ancora allineati: la proposta per loro è nella sezione 4.7 di [`Piano_Unificazione_Notazione.md`](Piano_Unificazione_Notazione.md), che contiene anche la corrispondenza con i nomi usati fino al 17-10-2026.
 
@@ -53,6 +53,7 @@ Suffissi riservati: `0` solo per la cella nominale; `_iniziale` per i valori ini
 | $n = 1,\dots,N$ | cella | — |
 | $k$ | istante di controllo attuale; $K$ numero di passi di una simulazione | indici di scenari o di griglie |
 | $j = 1,\dots,p$ | passo lungo l'orizzonte | indici generici |
+| $h = 0,\dots,p$ | passo a cui agisce una corrente della sequenza $u^n_{k+h \mid k}$ (forma impilata, [Q] sez. 3.1) | indici generici |
 | $i$ | corrente di pacco | indici di tratto o di componente |
 | $t$ | tempo | indice della formulazione (si usa $n_J$) |
 | $\zeta$ | stato della cella o del pacco | — |
@@ -77,7 +78,11 @@ Suffissi riservati: `0` solo per la cella nominale; `_iniziale` per i valori ini
 | $\sigma^0_{k+1}$ nell'eq. 7 | $\sigma^0_{k+j}$ | refuso del paper |
 | $f^n$, $g^n$ | $f$, $g$ con l'indice di cella sottinteso | come in [L] |
 
-Eccezione accettata: $f$ è sia la funzione di stato $f(\zeta, I)$ sia il termine lineare del QP (convenzione di `quadprog`); la funzione compare sempre con gli argomenti.
+Eccezione accettata: $f$ è sia la funzione di stato $f(\zeta, I)$ sia il termine lineare del QP (convenzione di `quadprog`); la funzione compare sempre con gli argomenti, e in [Q] il vettore è in grassetto, $\boldsymbol{f}$.
+
+### 1.6 Vettori in grassetto
+
+In [Q] i vettori sono in grassetto e le loro componenti no: $\boldsymbol{z}$ e $z_\ell$, $\boldsymbol{u}_k$ e $u^n_k$, $\bar{\boldsymbol{u}}$ e $\bar u^n$, $\boldsymbol{\varepsilon}$ e $\varepsilon_j$, $\boldsymbol{f}$ e $f_\ell$, $\boldsymbol{b}$ e $b_q$, $\boldsymbol{y}^{lib}$, $\boldsymbol{U}^n$, $\boldsymbol{Y}^n$, $\mathbf{1}$. Restano in carattere normale le matrici ($H$, $A$, $\bar Y$, $d$, $\Gamma^n$, $\mathcal{D}$, $\mathcal{P}$), le loro colonne scritte come sottomatrici ($d_{\cdot,n}$, $Y^{lib}_{\cdot,n}$), il vettore nullo $0$ e le grandezze scalari come $\varepsilon_y$. Nel codice i nomi non cambiano. [L] e [P] non usano ancora il grassetto.
 
 ---
 
@@ -149,6 +154,10 @@ Eccezione accettata: $f$ è sia la funzione di stato $f(\zeta, I)$ sia il termin
 | $y^0_{k+j}$, $s^0_{k+j}$, $V^0_p$ | tensione, SOC e polarizzazione della cella nominale | `y0`, `s0`, `Vp0` | — |
 | $\sigma^0_{k+j}$ | riferimento di $J_t$: la grandezza bilanciata della cella nominale | `sigma0` | `riferimento_nominale`, linea `sigma0` |
 | $\bar u^n = u^n_{k-1}$ | mossa precedente, punto di linearizzazione | `u_bar` | `correnti_bilanciamento_precedenti` |
+| $u^n_{k+h \mid k}$ | corrente che all'istante $k$ si prevede di applicare alla cella $n$ al passo $k+h$ ([L] (U1)); con l'ipotesi [L] (U2) vale $u^n_k$ per ogni $h$ | — | — |
+| $\boldsymbol{U}^n$, $\boldsymbol{Y}^n$ | forma impilata classica ([Q] sez. 3.1): le $p+1$ correnti future e le $p$ tensioni predette della cella $n$; $Y^n$ e $\bar Y^n$ sono le colonne $n$ di $Y$ e $\bar Y$; con la corrente costante $U^n = \mathbf{1}\, u^n_k$ | — | — |
+| $\Gamma^n$, $\gamma^n_{j,h}$ | matrice $p \times (p+1)$ delle derivate $\partial y^n_{k+j} / \partial u^n_{k+h \mid k}$; con la corrente costante le somme delle righe sono i $d_{j,n}$ ([Q] (S3)) | — | — |
+| $\mathbf{1}$ | vettore di tutti uni | — | — |
 | $y^n_{k+j}$, $s^n_{k+j}$ | tensione e SOC predetti; matrici $p \times N$ | `Y`, `S` (in `nlmpc`) | — |
 | $\bar Y_{j,n}$, $\bar S_{j,n}$ | traiettoria di linearizzazione | `Y_bar`, `S_bar` | — |
 | $\alpha_{j,n}$, $\beta_{j,n}$, $d_{j,n}$ | coefficienti di sensibilità di SOC, tensione di polarizzazione e tensione ai morsetti: derivate rispetto alla corrente della cella $n$ al passo $j$; a tempo continuo $\alpha(t)$, $\beta(t)$, $d(t)$ | matrici `alfa`, `d`; a un passo `alfa_j`, `beta_j`, `d_j` | — |

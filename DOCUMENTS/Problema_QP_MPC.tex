@@ -15,6 +15,7 @@
 \newcommand{\Dc}{\mathcal{D}}
 \newcommand{\Pc}{\mathcal{P}}
 \newcommand{\uno}{\mathbf{1}}
+\newcommand{\vett}[1]{\boldsymbol{#1}}      % vettore: in grassetto
 \newcommand{\lib}{\mathrm{lib}}             % risposta libera, come in [L]
 
 \title{Costruzione del problema quadratico\\nell'MPC di bilanciamento attivo}
@@ -59,8 +60,8 @@ Blocco & Che cosa calcola & Dove è descritto \\
 \midrule
 \file{Cella_nominale} & il riferimento $y^0_{k+1}, \dots, y^0_{k+p}$ & \rif \\
 \file{Predizione_linearizzata} & $\bar Y$, $\bar S$, $d$, $\alpha$ & \rif \\
-\file{Problema_QP} & $H$, $f$, $A$, $b$, $A_{eq}$, $b_{eq}$, $z_{\mathrm{iniz}}$ & questo documento \\
-\file{Solutore_QP} & la soluzione $z$, che contiene le correnti & sezioni~\ref{sec:attivi} e~\ref{sec:partenza} \\
+\file{Problema_QP} & $H$, $\vett{f}$, $A$, $\vett{b}$, $A_{eq}$, $\vett{b}_{eq}$, $\vett{z}_{\mathrm{iniz}}$ & questo documento \\
+\file{Solutore_QP} & la soluzione $\vett{z}$, che contiene le correnti & sezioni~\ref{sec:attivi} e~\ref{sec:partenza} \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -104,10 +105,16 @@ seguenti.
         scelta: la corrente resta la stessa su tutto l'orizzonte [L,~sezione~6].
         Le matrici $\bar Y$, $d$, $Y^\lib$ sono $p \times N$: la riga
         $j$ corrisponde all'istante $k+j$, la colonna $n$ alla cella $n$.
-  \item \emph{Componenti.} $z_\ell$ è la componente $\ell$ del vettore $z$,
+  \item \emph{Vettori.} I vettori sono in grassetto ($\vett{z}$, $\vett{u}_k$,
+        $\vett{f}$, $\vett{b}$), le loro componenti in carattere normale
+        ($z_\ell$, $u^n_k$, $f_\ell$, $b_q$). Le matrici ($H$, $A$, $\bar Y$,
+        $d$) sono in carattere normale. Al plurale il simbolo di un vettore
+        indica le sue componenti: ``le $\vett{\varepsilon}$'' sono le
+        variabili $\varepsilon_j$.
+  \item \emph{Componenti.} $z_\ell$ è la componente $\ell$ del vettore $\vett{z}$,
         $H_{\ell\ell'}$ l'elemento di riga $\ell$ e colonna $\ell'$ della
         matrice $H$; ${}^\top$ indica la trasposizione.
-  \item \emph{Barra.} Una grandezza con la barra, come $\bar u$ o $\bar Y$, è
+  \item \emph{Barra.} Una grandezza con la barra, come $\bar{\vett{u}}$ o $\bar Y$, è
         calcolata nel punto di linearizzazione, cioè con le correnti di
         bilanciamento del passo precedente.
   \item \emph{Correnti.} Sono positive in scarica. Una corrente di
@@ -123,19 +130,19 @@ Un problema quadratico è un problema di minimo in cui il costo è un polinomio
 di secondo grado nelle incognite e i vincoli sono di primo grado. Nella forma
 usata da \texttt{quadprog}:
 \begin{equation}
-  \min_{z} \;\; \tfrac12\, z^\top H z + f^\top z
-  \qquad \text{con} \qquad A\,z \le b , \quad A_{eq}\, z = b_{eq} .
+  \min_{\vett{z}} \;\; \tfrac12\, \vett{z}^\top H \vett{z} + \vett{f}^\top \vett{z}
+  \qquad \text{con} \qquad A\,\vett{z} \le \vett{b} , \quad A_{eq}\, \vett{z} = \vett{b}_{eq} .
   \label{eq:qp}
 \end{equation}
 Gli oggetti che vi compaiono sono:
 \begin{itemize}
-  \item $z \in \mathbb{R}^{n_z}$, il vettore colonna delle incognite
+  \item $\vett{z} \in \mathbb{R}^{n_z}$, il vettore colonna delle incognite
         $z_1, \dots, z_{n_z}$;
-  \item $H$, matrice simmetrica $n_z \times n_z$, e $f \in \mathbb{R}^{n_z}$,
+  \item $H$, matrice simmetrica $n_z \times n_z$, e $\vett{f} \in \mathbb{R}^{n_z}$,
         che insieme definiscono il costo;
-  \item $A$, matrice $n_{dis} \times n_z$, e $b \in \mathbb{R}^{n_{dis}}$, che
+  \item $A$, matrice $n_{dis} \times n_z$, e $\vett{b} \in \mathbb{R}^{n_{dis}}$, che
         definiscono $n_{dis}$ vincoli di disuguaglianza;
-  \item $A_{eq}$ e $b_{eq}$, che definiscono allo stesso modo i vincoli di
+  \item $A_{eq}$ e $\vett{b}_{eq}$, che definiscono allo stesso modo i vincoli di
         uguaglianza.
 \end{itemize}
 Le disuguaglianze si leggono riga per riga: la riga $q$ dice che
@@ -146,12 +153,12 @@ Ogni riga di $A$ è quindi un vincolo e ogni colonna un'incognita: l'elemento
 $A_{q\ell}$ è il coefficiente con cui l'incognita $z_\ell$ compare nel vincolo $q$,
 ed è zero se non vi compare.
 
-\subsection{Come si leggono $H$ e $f$ da un costo}\label{sec:regola-costo}
+\subsection{Come si leggono $H$ e $\vett{f}$ da un costo}\label{sec:regola-costo}
 
 Svolgendo i prodotti nella \eqref{eq:qp}, e usando la simmetria di $H$, il
 costo si scrive
 \begin{equation}
-  \tfrac12\, z^\top H z + f^\top z
+  \tfrac12\, \vett{z}^\top H \vett{z} + \vett{f}^\top \vett{z}
   = \tfrac12 \sum_{\ell} H_{\ell\ell}\, z_\ell^2
     + \sum_{\ell < \ell'} H_{\ell\ell'}\, z_\ell z_{\ell'}
     + \sum_{\ell} f_\ell\, z_\ell .
@@ -170,16 +177,16 @@ usata in tutto il documento:
 Per esempio, il costo $3 z_1^2 + z_1 z_2 + 5 z_2^2 - 4 z_1 + 7$ corrisponde a
 \[
   H = \begin{bmatrix} 6 & 1 \\ 1 & 10 \end{bmatrix}, \qquad
-  f = \begin{bmatrix} -4 \\ 0 \end{bmatrix} .
+  \vett{f} = \begin{bmatrix} -4 \\ 0 \end{bmatrix} .
 \]
 Il fattore $\tfrac12$ è una convenzione: fa sì che il gradiente del costo sia
-$Hz + f$ e che $H$ sia la matrice delle sue derivate seconde. In questo
+$H\vett{z} + \vett{f}$ e che $H$ sia la matrice delle sue derivate seconde. In questo
 documento i prodotti misti $z_\ell z_{\ell'}$ non compariranno mai: $H$ sarà sempre una
 matrice diagonale.
 
 \subsection{Come si scrive un vincolo}\label{sec:regola-vincolo}
 
-Per portare un vincolo di primo grado nella forma di una riga di $A z \le b$
+Per portare un vincolo di primo grado nella forma di una riga di $A \vett{z} \le \vett{b}$
 bastano tre mosse:
 \begin{enumerate}
   \item portare a sinistra i termini con le incognite e a destra i numeri;
@@ -190,16 +197,16 @@ bastano tre mosse:
         $-z_\ell \le -z_{\min}$.
 \end{enumerate}
 Per esempio $2 z_1 \ge 3 + z_2$ diventa prima $2 z_1 - z_2 \ge 3$ e poi
-$-2 z_1 + z_2 \le -3$: la riga di $A$ è $[\,-2 \;\; 1\,]$ e l'elemento di $b$ è
+$-2 z_1 + z_2 \le -3$: la riga di $A$ è $[\,-2 \;\; 1\,]$ e l'elemento di $\vett{b}$ è
 $-3$. Un vincolo di uguaglianza diventa, allo stesso modo, una riga di
-$A_{eq}\, z = b_{eq}$.
+$A_{eq}\, \vett{z} = \vett{b}_{eq}$.
 
 \subsection{Convessità: perché un QP si risolve bene}\label{sec:convessita}
 
 Una matrice simmetrica $H$ è \emph{semidefinita positiva} se
-$z^\top H z \ge 0$ per ogni $z$, e \emph{definita positiva} se
-$z^\top H z > 0$ per ogni $z \ne 0$. Per una matrice diagonale il controllo è
-immediato, perché $z^\top H z = \sum_\ell H_{\ell\ell}\, z_\ell^2$: è semidefinita positiva
+$\vett{z}^\top H \vett{z} \ge 0$ per ogni $\vett{z}$, e \emph{definita positiva} se
+$\vett{z}^\top H \vett{z} > 0$ per ogni $\vett{z} \ne 0$. Per una matrice diagonale il controllo è
+immediato, perché $\vett{z}^\top H \vett{z} = \sum_\ell H_{\ell\ell}\, z_\ell^2$: è semidefinita positiva
 se e solo se tutti gli elementi della diagonale sono maggiori o uguali a zero,
 definita positiva se e solo se sono tutti maggiori di zero. Valgono allora i
 fatti seguenti.
@@ -227,8 +234,8 @@ prevedibili.
 
 \subsection{Punti ammissibili, vincoli attivi e metodo active-set}\label{sec:attivi}
 
-Un punto $z$ è \emph{ammissibile} se rispetta tutti i vincoli. Un vincolo di
-disuguaglianza è \emph{attivo} in $z$ se vi vale con il segno di uguaglianza:
+Un punto $\vett{z}$ è \emph{ammissibile} se rispetta tutti i vincoli. Un vincolo di
+disuguaglianza è \emph{attivo} in $\vett{z}$ se vi vale con il segno di uguaglianza:
 il punto sta sul bordo del semispazio corrispondente. Nella soluzione di un QP
 alcuni vincoli sono attivi e gli altri no; se si sapesse in anticipo quali,
 basterebbe risolvere un sistema di equazioni di primo grado.
@@ -238,15 +245,17 @@ per tentativi ordinati. Parte da un punto, tiene un elenco dei vincoli che
 considera attivi, risolve il problema come se quelli fossero uguaglianze e a
 ogni iterazione aggiunge o toglie un vincolo dall'elenco, finché non può più
 migliorare. Ha bisogno di un punto da cui partire: per questo il blocco gliene
-prepara uno, $z_{\mathrm{iniz}}$, già ammissibile (sezione~\ref{sec:partenza}).
+prepara uno, $\vett{z}_{\mathrm{iniz}}$, già ammissibile (sezione~\ref{sec:partenza}).
 
 \section{Il problema di controllo}\label{sec:controllo}
 
 \subsection{Incognite e vincoli}\label{sec:vincoli-problema}
 
 All'istante $k$ le incognite sono le correnti di bilanciamento, una per cella:
-$u_k = (u^1_k, \dots, u^N_k)$. Ciascuna è tenuta costante su tutto l'orizzonte di
-predizione, quindi le incognite sono $N$ e non $pN$. Oltre alle equazioni del
+$\vett{u}_k = (u^1_k, \dots, u^N_k)$. Ciascuna è tenuta costante su tutto l'orizzonte di
+predizione, quindi le incognite sono $N$ e non $(p+1)N$: il confronto con la
+forma classica dell'MPC, che impila in un unico vettore le correnti di tutti i
+passi, è alla fine di questa sezione. Oltre alle equazioni del
 modello della cella (eq.~6b--6c), di cui si dice alla fine di questa sezione,
 devono rispettare tre vincoli (eq.~6d--6f):
 \begin{align}
@@ -268,7 +277,7 @@ devono rispettare tre vincoli (eq.~6d--6f):
         cella all'altra, senza crearne né consumarne: ciò che toglie a una
         cella lo cede a un'altra.
 \end{itemize}
-Le tensioni predette dipendono da $u_k$ attraverso il modello della cella
+Le tensioni predette dipendono da $\vett{u}_k$ attraverso il modello della cella
 [L,~sezione~2]: per questo la \eqref{eq:tensione} è un vincolo sulle correnti.
 
 \subsubsection{Che fine fanno le equazioni del modello (eq.~6b--6c)}
@@ -276,7 +285,7 @@ Le tensioni predette dipendono da $u_k$ attraverso il modello della cella
 Nel problema (6) del paper i vincoli non sono solo le
 \eqref{eq:limiti}--\eqref{eq:somma}. Prima di questi il paper elenca le
 equazioni del modello della cella: l'eq.~6b fa avanzare di un passo lo stato
-della cella, $\zeta^n = (s^n, V^n_p)$, e l'eq.~6c ne ricava la tensione ai
+della cella, $\vett{\zeta}^n = (s^n, V^n_p)$, e l'eq.~6c ne ricava la tensione ai
 morsetti. Il paper le scrive in forma compatta; per esteso sono il modello
 discreto di [L,~sezione~2.3], cioè le [L,~(2)--(4)] con l'indice di cella
 scritto. Per ogni cella $n = 1,\dots,N$ e per ogni passo $j = 1,\dots,p$:
@@ -364,7 +373,7 @@ Sono le funzioni di [L,~(U3)], e sono proprio quelle che compaiono nella
 $y^n_{k+j}$ come funzione di $u^n_k$, quelle formule hanno già eliminato gli
 stati.
 
-Ne segue che, per ogni scelta delle correnti $u_k$, esiste una e una sola
+Ne segue che, per ogni scelta delle correnti $\vett{u}_k$, esiste una e una sola
 successione di stati e di tensioni che rispetta le
 \eqref{eq:m-soc}--\eqref{eq:m-y}: quella che la sostituzione calcola. Le
 equazioni del modello quindi non escludono nessuna corrente: si limitano a
@@ -473,7 +482,7 @@ Equazione & Che cosa diventa & Blocco \\
   \file{Predizione_linearizzata} \tabularnewline[3pt]
  &
   \raggedright $Y^\lib$ e $d$ della \eqref{eq:pred}, nelle righe di $A$ e di
-  $b$ (e in $H$, $f$ per $J_t$) &
+  $\vett{b}$ (e in $H$, $\vett{f}$ per $J_t$) &
   \file{Problema_QP} \tabularnewline
 \bottomrule
 \end{tabular}
@@ -481,8 +490,8 @@ Equazione & Che cosa diventa & Blocco \\
 \noindent
 Nel QP, quindi, le equazioni del modello non hanno righe proprie: sono
 contenute nei numeri $Y^\lib_{j,n}$ e $d_{j,n}$, che entrano nella matrice $A$
-e nel vettore $b$ (sezioni~\ref{sec:vincolo-tensione}, \ref{sec:jm}
-e~\ref{sec:jd}) e, per $J_t$, in $H$ e in $f$ (sezione~\ref{sec:jt}).
+e nel vettore $\vett{b}$ (sezioni~\ref{sec:vincolo-tensione}, \ref{sec:jm}
+e~\ref{sec:jd}) e, per $J_t$, in $H$ e in $\vett{f}$ (sezione~\ref{sec:jt}).
 
 \paragraph{Quanto si guadagna.} Con i valori di \file{init_parametri.m},
 $N = 3$ celle e $p = 30$ passi, la forma con gli stati ha $2pN = 180$
@@ -510,20 +519,233 @@ gli stati: gli stati predetti sono incognite dell'ottimizzatore, e la funzione
 di stato \file{zeta_next.m} entra come vincolo di uguaglianza, cioè come
 l'eq.~6b. È una delle ragioni per cui quel codice è più lento.
 
+\subsubsection{Perché le correnti non si impilano lungo l'orizzonte}\label{sec:sequenza}
+
+Nella formulazione classica dell'MPC l'ottimizzatore sceglie una corrente per
+ogni passo dell'orizzonte, e le correnti future si impilano in un unico
+vettore di incognite. Nel problema~(6) del paper, e quindi nel QP, le
+incognite sono invece le sole $N$ correnti $\vett{u}_k$. Il motivo è l'ipotesi sulla
+corrente lungo l'orizzonte già vista in [L,~sezione~6] (ipotesi H7 di [P]).
+Questo paragrafo la confronta con la forma classica e mostra che cosa diventa,
+nella forma classica, il coefficiente di sensibilità $d_{j,n}$.
+
+\paragraph{La forma classica.} Sia $u^n_{k+h\,|\,k}$ la corrente di
+bilanciamento che, all'istante $k$, si prevede di applicare alla cella $n$ al
+passo $k+h$, con $h = 0, 1, \dots, p$ [L,~(U1)]. In [L] l'indice è $j$; qui ne
+serve uno diverso, perché $j$ indica il passo della tensione predetta. L'MPC
+classico lascia libera la corrente a ogni passo e raccoglie le correnti future
+in un unico vettore di incognite:
+\[
+  \vett{U} = \begin{bmatrix} \vett{u}_{k\,|\,k} \\ \vett{u}_{k+1\,|\,k} \\ \vdots \\ \vett{u}_{k+p\,|\,k} \end{bmatrix}
+      \in \mathbb{R}^{(p+1)N} ,
+  \qquad
+  \vett{u}_{k+h\,|\,k} = \begin{bmatrix} u^1_{k+h\,|\,k} \\ \vdots \\ u^N_{k+h\,|\,k} \end{bmatrix} .
+\]
+La sequenza arriva fino a $k+p$, e non solo fino a $k+p-1$, perché anche
+l'ultima tensione predetta, $y^n_{k+p}$, dipende dalla corrente del suo stesso
+passo, attraverso la caduta su $R_o$ (la \eqref{eq:m-y} con la corrente del
+passo $k+p$). Poiché la predizione della cella $n$ dipende solo dalle correnti
+della cella $n$ [L,~sezione~4], conviene raccogliere le stesse grandezze cella
+per cella:
+\[
+  \vett{U}^n = \begin{bmatrix} u^n_{k\,|\,k} \\ u^n_{k+1\,|\,k} \\ \vdots \\ u^n_{k+p\,|\,k} \end{bmatrix}
+        \in \mathbb{R}^{p+1} ,
+  \qquad
+  \vett{Y}^n = \begin{bmatrix} y^n_{k+1} \\ y^n_{k+2} \\ \vdots \\ y^n_{k+p} \end{bmatrix}
+        \in \mathbb{R}^{p} .
+\]
+$\vett{Y}^n$ è la colonna $n$ della matrice $p \times N$ delle tensioni predette;
+allo stesso modo $\bar{\vett{Y}}^n$ è la colonna $n$ di $\bar Y$. Linearizzando attorno
+alla stessa traiettoria usata dal blocco \file{Predizione_linearizzata}, cioè
+con tutte le correnti uguali alla mossa precedente, $\vett{U}^n = \uno\,\bar u^n$
+($\uno$ è il vettore di $p+1$ uni), si ottiene la predizione impilata della
+forma classica:
+\begin{equation}
+  \vett{Y}^n \simeq \bar{\vett{Y}}^n + \Gamma^n \bigl(\vett{U}^n - \uno\,\bar u^n\bigr) ,
+  \qquad
+  \gamma^n_{j,h} = \left.\frac{\partial y^n_{k+j}}{\partial u^n_{k+h\,|\,k}}
+                   \right|_{\vett{U}^n = \uno\,\bar u^n} ,
+  \tag{S1}\label{eq:s-impilata}
+\end{equation}
+dove $\Gamma^n$ è la matrice $p \times (p+1)$ di elementi $\gamma^n_{j,h}$: la
+riga $j = 1, \dots, p$ è la tensione all'istante $k+j$, la colonna
+$h = 0, \dots, p$ la corrente del passo $k+h$. È lo sviluppo al primo ordine di
+una funzione di $p+1$ variabili, là dove [L,~(6)] sviluppa una funzione di una
+variabile. Tre proprietà di $\Gamma^n$:
+\begin{itemize}
+  \item è \emph{triangolare inferiore}: $\gamma^n_{j,h} = 0$ per $h > j$,
+        perché una corrente applicata dopo l'istante $k+j$ non può cambiare la
+        tensione in $k+j$;
+  \item sulla diagonale vale $\gamma^n_{j,j} = -R_o(\bar S_{j,n})$: la
+        corrente del passo $k+j$ agisce sulla tensione dello stesso passo solo
+        attraverso la resistenza serie, perché lo stato in $k+j$ dipende solo
+        dalle correnti dei passi precedenti;
+  \item sotto la diagonale ($h < j$) l'effetto passa per lo stato: la corrente
+        del passo $k+h$ cambia il SOC e la tensione di polarizzazione dal passo
+        $k+h+1$ in poi.
+\end{itemize}
+In un MPC lineare tempo-invariante $\gamma^n_{j,h}$ dipenderebbe solo dalla
+distanza $j-h$, e la matrice si calcolerebbe una volta per tutte. Qui il
+modello non è lineare: $\Gamma^n$ cambierebbe a ogni passo di controllo
+insieme alla traiettoria di linearizzazione, come cambia $d$.
+
+Con la sequenza libera le incognite di corrente sono $(p+1)N$, cioè 93 con
+$N = 3$ e $p = 30$. Inoltre ogni tensione $y^n_{k+j}$ dipende da più correnti
+della stessa cella, quindi nel costo $J_t$ compaiono i loro prodotti: la parte
+di $H$ relativa alle correnti avrebbe, per ogni cella, un blocco pieno di
+$(p+1) \times (p+1)$ elementi.
+
+\paragraph{L'ipotesi del paper.} Il paper (eq.~6b) non lascia libera la
+sequenza: tiene ogni corrente costante su tutto l'orizzonte [L,~(U2)]. Con i
+vettori appena definiti:
+\begin{equation}
+  u^n_{k+h\,|\,k} = u^n_k , \quad h = 0, 1, \dots, p
+  \qquad\Longleftrightarrow\qquad
+  \vett{U}^n = \uno\, u^n_k .
+  \tag{S2}\label{eq:s-costante}
+\end{equation}
+Nel linguaggio dell'MPC classico è un \emph{orizzonte di controllo} pari a 1:
+la mossa si sceglie per il primo passo e si tiene ferma fino alla fine
+dell'orizzonte di predizione (in inglese si parla di \emph{move blocking}). Il
+codice con \texttt{nlmpc} fa la stessa scelta: in \file{crea_mpc.m} è
+\texttt{ControlHorizon = 1}.
+
+\paragraph{Che cosa diventa $\Gamma^n$.} Con la \eqref{eq:s-costante} lo
+scostamento dalla traiettoria di linearizzazione è lo stesso a ogni passo,
+$\vett{U}^n - \uno\,\bar u^n = \uno\,(u^n_k - \bar u^n)$, e la
+\eqref{eq:s-impilata} diventa
+\[
+  \vett{Y}^n \simeq \bar{\vett{Y}}^n + \bigl(\Gamma^n \uno\bigr)\,\bigl(u^n_k - \bar u^n\bigr) .
+\]
+Il prodotto $\Gamma^n \uno$ è un vettore di $p$ elementi, e il suo elemento
+$j$ è la somma della riga $j$ di $\Gamma^n$. Questa somma è proprio il
+coefficiente di sensibilità $d_{j,n}$. Lo dice la regola di derivazione delle
+funzioni composte: se $F(x) = f(x, x, \dots, x)$, allora
+$F'(x) = \sum_h \partial f / \partial x_h$, perché ogni argomento cresce con
+$x$ con derivata~1. Per la [L,~(U3)] la funzione $y^n_{k+j}(u^n_k)$ che [L]
+linearizza è proprio la [L,~(U1)] con tutti gli argomenti uguali a $u^n_k$;
+quindi
+\begin{equation}
+  d_{j,n}
+  = \left.\frac{\partial y^n_{k+j}}{\partial u^n_k}\right|_{\bar u^n}
+  = \sum_{h=0}^{p} \gamma^n_{j,h}
+  = \sum_{h=0}^{j} \gamma^n_{j,h} ,
+  \qquad j = 1, \dots, p ,
+  \tag{S3}\label{eq:s-somma}
+\end{equation}
+dove l'ultima somma si ferma a $h = j$ perché $\Gamma^n$ è triangolare
+inferiore. Con la \eqref{eq:s-somma} la predizione impilata coincide, riga per
+riga, con la [L,~(6)], e raccogliendo la risposta libera con la
+\eqref{eq:pred}. Il coefficiente $d_{j,n}$ è quindi la \emph{risposta al gradino} della cella
+linearizzata: di quanto cambia $y^n_{k+j}$ se la corrente di bilanciamento
+aumenta di 1~A a tutti i passi, da $k$ a $k+j$. La matrice $\Gamma^n$, di
+$p \times (p+1)$ numeri, si riduce alla colonna $n$ della matrice $d$, di $p$
+numeri; per tutto il pacco le $(p+1)N$ incognite di corrente diventano $N$.
+
+\paragraph{Un esempio numerico.} Si riprende la cella dell'esempio di
+[L,~sezione~5.3]: fattori di deviazione uguali a 1, $s_k = 0{,}6$,
+$V_{p,k} = 0$, corrente di cella $I = 10$~A nel punto di linearizzazione,
+$T_c = 20$~s. L'orizzonte è $p = 2$ e l'indice di cella è sottinteso. Le
+derivate $\gamma_{j,h}$, calcolate per differenze finite sul modello
+\eqref{eq:m-soc}--\eqref{eq:m-y} con una corrente diversa a ogni passo,
+valgono, in mV/A:
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+ & $h = 0$ & $h = 1$ & $h = 2$ & Somma della riga \\
+ & $u_{k\,|\,k}$ & $u_{k+1\,|\,k}$ & $u_{k+2\,|\,k}$ & \\
+\midrule
+$j = 1$, tensione $y_{k+1}$ & $-0{,}981$ & $-8{,}239$ & $0$ & $-9{,}220 = d_1$ \\
+$j = 2$, tensione $y_{k+2}$ & $-0{,}630$ & $-0{,}985$ & $-8{,}238$ & $-9{,}853 = d_2$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Le somme delle righe sono i coefficienti $d_1$ e $d_2$ della tabella di
+[L,~sezione~5.3]. Ogni elemento si legge con i termini di quella tabella:
+\begin{itemize}
+  \item \emph{diagonale}: $-R_o$, letta nel SOC di fine passo:
+        $R_o(s_{k+1}) = 8{,}239$~m$\Omega$ e $R_o(s_{k+2}) = 8{,}238$~m$\Omega$;
+  \item $\gamma_{1,0}$: la corrente del passo $k$ alza la tensione di
+        polarizzazione di $T_c / C_p(s_k) = 20/24685$~V/A $= 0{,}810$~mV/A e
+        abbassa il SOC di $\kappa$ per ampere, quindi la tensione a vuoto di
+        $V_{oc}'\,\kappa = 0{,}853 \cdot 2{,}011 \cdot 10^{-4}$~V/A
+        $= 0{,}172$~mV/A; il termine di $R_o$ tramite il SOC vale
+        $+0{,}001$~mV/A. In tutto $-0{,}810 - 0{,}172 + 0{,}001 = -0{,}981$~mV/A;
+  \item $\gamma_{2,1}$: lo stesso effetto per la corrente del passo $k+1$, con
+        $C_p$ letta in $s_{k+1}$: $T_c / C_p(s_{k+1}) = 20/24565$~V/A
+        $= 0{,}814$~mV/A, e $-0{,}814 - 0{,}172 + 0{,}001 = -0{,}985$~mV/A;
+  \item $\gamma_{2,0}$: l'effetto della corrente del passo $k$ due passi dopo.
+        La parte sulla tensione di polarizzazione si è ridotta del fattore
+        $1 - T_c/\tau(s_{k+1}) = 1 - 20/46{,}0 = 0{,}565$, perché il ramo RC si
+        scarica: $0{,}810 \cdot 0{,}565 = 0{,}458$~mV/A. La parte sul SOC resta
+        $0{,}172$~mV/A, perché la carica tolta non torna. In tutto
+        $-0{,}458 - 0{,}172 + 0{,}001 = -0{,}629$~mV/A; il resto,
+        $-0{,}001$~mV/A, viene da $\tau$ e $C_p$ che cambiano con il SOC.
+\end{itemize}
+Il termine più grande è quello sulla diagonale: gran parte dell'effetto di una
+corrente sulla tensione è immediato. L'effetto attraverso lo stato è piccolo
+in ogni singola colonna, ma con la \eqref{eq:s-costante} si somma su tutte le
+colonne: è per questo che $|d_j|$ cresce con $j$ (nella tabella di
+[L,~sezione~5.3], $d_{30} = -14{,}897$~mV/A). Con la corrente costante la
+matrice $2 \times 3$ diventa la colonna $(d_1, d_2)$; con $p = 30$, le 31
+incognite di ogni cella diventano una.
+
+\paragraph{Perché è lecito, e che cosa costa.}
+\begin{itemize}
+  \item \emph{È un'ipotesi della predizione, non della corrente applicata.}
+        Dell'ottimo si applica solo $\vett{u}_k$, per un passo; all'istante $k+1$ il
+        problema si risolve di nuovo, con le nuove misure [L,~sezione~6]. La
+        corrente applicata al pacco cambia quindi a ogni passo di controllo: è
+        costante solo dentro ciascuna predizione.
+  \item \emph{Il paper la giustifica} con la lentezza delle correnti di
+        bilanciamento (sua Fig.~2): se la corrente ottima cambia poco lungo
+        l'orizzonte, tenerla costante cambia poco la predizione.
+  \item \emph{Il prezzo.} Le sequenze costanti sono una parte delle sequenze
+        possibili, quindi il costo minimo con la \eqref{eq:s-costante} non può
+        essere più basso di quello con la sequenza libera. Si rinuncia, per
+        esempio, a pianificare una corrente che cambia segno dentro
+        l'orizzonte.
+  \item \emph{Il guadagno} va oltre il numero di incognite, come riassume la
+        tabella ($N = 3$, $p = 30$).
+\end{itemize}
+\begin{center}
+\begin{tabular}{p{3.9cm}p{4.9cm}p{4.9cm}}
+\toprule
+ & \raggedright Sequenza libera (forma classica) &
+   \raggedright Corrente costante (paper e blocco \file{Problema_QP})
+   \tabularnewline
+\midrule
+\raggedright Incognite di corrente &
+  \raggedright $(p+1)N = 93$ &
+  $N = 3$ \tabularnewline[3pt]
+\raggedright Termine che dipende dalle correnti, cella $n$ &
+  \raggedright $\Gamma^n(\vett{U}^n - \uno\,\bar u^n)$: $p \times (p+1)$ numeri &
+  \raggedright $d_{j,n}(u^n_k - \bar u^n)$: $p$ numeri, la colonna $n$ di $d$
+  \tabularnewline[3pt]
+\raggedright Predizione linearizzata di $y^n_{k+j}$ &
+  \raggedright funzione lineare di $j+1$ correnti &
+  retta nella sola $u^n_k$ \tabularnewline[3pt]
+\raggedright Parte di $H$ sulle correnti ($J_t$) &
+  \raggedright un blocco pieno $(p+1) \times (p+1)$ per cella &
+  diagonale (sezione~\ref{sec:jt}) \tabularnewline
+\bottomrule
+\end{tabular}
+\end{center}
+
 \subsection{I tre costi}
 
-Il paper propone tre modi di misurare quanto è buona una scelta di $u_k$. In
+Il paper propone tre modi di misurare quanto è buona una scelta di $\vett{u}_k$. In
 tutti compare una \emph{grandezza bilanciata} $\sigma$, che può essere la
 tensione ($\sigma = y$) o lo stato di carica ($\sigma = s$);
 $\sigma^n_{k+j}$ è il suo valore predetto per la cella $n$ all'istante $k+j$.
 \begin{align}
-  J_t(u_k) &= \sum_{j=1}^{p} \sum_{n=1}^{N} \bigl(\sigma^n_{k+j} - \sigma^0_{k+j}\bigr)^2
+  J_t(\vett{u}_k) &= \sum_{j=1}^{p} \sum_{n=1}^{N} \bigl(\sigma^n_{k+j} - \sigma^0_{k+j}\bigr)^2
             + \rho \sum_{n=1}^{N} (u^n_k)^2
      && \text{(eq.~7)} \label{eq:jt}\\
-  J_m(u_k) &= -\sum_{j=1}^{p} \min_{n}\, \sigma^n_{k+j}
+  J_m(\vett{u}_k) &= -\sum_{j=1}^{p} \min_{n}\, \sigma^n_{k+j}
             + \rho \sum_{n=1}^{N} (u^n_k)^2
      && \text{(eq.~8)} \label{eq:jm}\\
-  J_\Delta(u_k) &= \sum_{j=1}^{p} \Bigl(\max_{n}\, \sigma^n_{k+j}
+  J_\Delta(\vett{u}_k) &= \sum_{j=1}^{p} \Bigl(\max_{n}\, \sigma^n_{k+j}
                  - \min_{n}\, \sigma^n_{k+j}\Bigr)
             + \rho \sum_{n=1}^{N} (u^n_k)^2
      && \text{(eq.~11)} \label{eq:jd}
@@ -546,7 +768,7 @@ $\sigma^n_{k+j}$ è il suo valore predetto per la cella $n$ all'istante $k+j$.
 \end{itemize}
 Il secondo addendo è lo stesso nelle tre formulazioni: penalizza le correnti
 di bilanciamento grandi, che sprecano energia per effetto Joule. Nel paper è
-$u_k^\top R\, u_k$ con $R$ una matrice di peso; nel progetto $R = \rho\, I$, con
+$\vett{u}_k^\top R\, \vett{u}_k$ con $R$ una matrice di peso; nel progetto $R = \rho\, I$, con
 $\rho > 0$ scelto per ciascuna formulazione e proporzionale a $p$, perché il
 primo addendo è una somma di $p$ termini e cresce con l'orizzonte.
 
@@ -559,7 +781,7 @@ e i tre rimedi insieme portano alla forma \eqref{eq:qp}.
 \toprule
 Ostacolo & Rimedio & Sezione \\
 \midrule
-Le tensioni predette non sono funzioni di primo grado di $u_k$: il modello della
+Le tensioni predette non sono funzioni di primo grado di $\vett{u}_k$: il modello della
 cella non è lineare &
 si sostituisce la predizione con la sua retta tangente &
 \ref{sec:incognite} \\[4pt]
@@ -569,7 +791,7 @@ si aggiunge un'incognita $\varepsilon_y$ che lo allenta, a caro prezzo &
 \ref{sec:vincolo-tensione} \\[4pt]
 Il minimo e il massimo tra le celle, in $J_m$ e $J_\Delta$, non sono
 polinomi &
-si aggiungono le incognite $\varepsilon$, che ne prendono il posto &
+si aggiungono le incognite $\vett{\varepsilon}$, che ne prendono il posto &
 \ref{sec:jm} e \ref{sec:jd} \\
 \bottomrule
 \end{tabular}
@@ -627,19 +849,19 @@ Oltre alle correnti, il QP ha alcune incognite in più, che servono a superare
 il secondo e il terzo ostacolo della sezione~\ref{sec:ostacoli}. Sono raccolte
 tutte in un solo vettore:
 \begin{equation}
-  z = \begin{bmatrix} u_k \\ \varepsilon \\ \varepsilon_y \end{bmatrix} ,
+  \vett{z} = \begin{bmatrix} \vett{u}_k \\ \vett{\varepsilon} \\ \varepsilon_y \end{bmatrix} ,
   \label{eq:z}
 \end{equation}
-dove $u_k \in \mathbb{R}^N$ sono le correnti di bilanciamento, $\varepsilon$ le
+dove $\vett{u}_k \in \mathbb{R}^N$ sono le correnti di bilanciamento, $\vett{\varepsilon}$ le
 variabili ausiliarie del costo (sezioni~\ref{sec:jm} e~\ref{sec:jd}) ed $\varepsilon_y$ è
 una sola variabile, che allenta il vincolo di tensione
-(sezione~\ref{sec:vincolo-tensione}). Il numero delle $\varepsilon$ dipende
+(sezione~\ref{sec:vincolo-tensione}). Il numero delle $\vett{\varepsilon}$ dipende
 dalla formulazione:
 
 \begin{center}
 \begin{tabular}{lccc}
 \toprule
-Formulazione & Variabili $\varepsilon$ & Numero di $\varepsilon$ & Numero di incognite $n_z$ \\
+Formulazione & Variabili $\vett{\varepsilon}$ & Numero di $\vett{\varepsilon}$ & Numero di incognite $n_z$ \\
 \midrule
 $J_t$ & nessuna & 0 & $N + 1$ \\
 $J_m$ & $\varepsilon_1, \dots, \varepsilon_p$ & $p$ & $N + p + 1$ \\
@@ -649,7 +871,7 @@ $J_\Delta$ & $\varepsilon_1, \dots, \varepsilon_p$ e $\varepsilon_{p+1}, \dots, 
 \end{center}
 
 \noindent
-La posizione di ogni incognita dentro $z$ segue l'ordine della
+La posizione di ogni incognita dentro $\vett{z}$ segue l'ordine della
 \eqref{eq:z}:
 \[
   u^n_k \to z_n , \qquad
@@ -658,27 +880,27 @@ La posizione di ogni incognita dentro $z$ segue l'ordine della
   \varepsilon_y \to z_{n_z} .
 \]
 In tutti i casi le correnti occupano le prime $N$ posizioni ed $\varepsilon_y$ l'ultima.
-Le variabili $\varepsilon$ ed $\varepsilon_y$ non sono grandezze da applicare al pacco:
+Le variabili $\vett{\varepsilon}$ ed $\varepsilon_y$ non sono grandezze da applicare al pacco:
 sono incognite di servizio, introdotte per poter scrivere il problema nella
-forma \eqref{eq:qp}. Dalla soluzione $z$ si applicano solo le prime $N$
+forma \eqref{eq:qp}. Dalla soluzione $\vett{z}$ si applicano solo le prime $N$
 componenti.
 
 \subsection{Come si costruiscono le matrici}\label{sec:metodo}
 
-Il metodo è lo stesso per tutte le matrici. Si parte da $H$, $f$, $A$ e $b$
+Il metodo è lo stesso per tutte le matrici. Si parte da $H$, $\vett{f}$, $A$ e $\vett{b}$
 pieni di zeri, e si esamina un pezzo del problema alla volta: un termine del
 costo oppure un gruppo di vincoli. Ogni pezzo viene scritto per esteso nelle
 incognite, e le due regole della sezione~\ref{sec:richiami} dicono quali
 elementi riempie e con quale valore:
 \begin{itemize}
-  \item un termine del costo riempie elementi di $H$ e di $f$
+  \item un termine del costo riempie elementi di $H$ e di $\vett{f}$
         (sezione~\ref{sec:regola-costo}), nelle posizioni delle incognite che
         contiene;
-  \item un vincolo riempie una riga nuova di $A$ e un elemento di $b$
+  \item un vincolo riempie una riga nuova di $A$ e un elemento di $\vett{b}$
         (sezione~\ref{sec:regola-vincolo}): i coefficienti vanno nelle colonne
         delle incognite che contiene.
 \end{itemize}
-In entrambi i casi serve solo sapere la posizione di ogni incognita in $z$,
+In entrambi i casi serve solo sapere la posizione di ogni incognita in $\vett{z}$,
 data qui sopra. Le sezioni dalla~\ref{sec:vincolo-tensione}
 alla~\ref{sec:rimanenti} fanno questo lavoro un pezzo alla volta, spiegando
 da dove viene ciascuno; la sezione~\ref{sec:completo} raccoglie poi tutti gli
@@ -690,11 +912,11 @@ elementi in una procedura unica, passo per passo.
 
 Con la \eqref{eq:pred} il vincolo \eqref{eq:tensione} diventa
 $Y^\lib_{j,n} + d_{j,n}\,u^n_k \ge y_{\min}$ per ogni $j$ e $n$: sono $pN$
-disuguaglianze di primo grado. Può però accadere che nessuna $u_k$ ammissibile le
+disuguaglianze di primo grado. Può però accadere che nessuna $\vett{u}_k$ ammissibile le
 soddisfi tutte. Per esempio, con $y_{\min} = 3{,}2$~V, $d_{j,n} = -15$~mV/A e
 correnti limitate a $\pm 2$~A, la tensione predetta di una cella si può alzare
 al più di 30~mV rispetto alla risposta libera, e solo dando alla cella $-2$~A:
-se la risposta libera vale 3,15~V, il vincolo è violato qualunque sia $u_k$. Un
+se la risposta libera vale 3,15~V, il vincolo è violato qualunque sia $\vett{u}_k$. Un
 QP con insieme ammissibile vuoto non ha soluzione: il controllore resterebbe
 senza risposta proprio quando una cella sta per cedere.
 
@@ -708,7 +930,7 @@ e farla pagare nel costo:
 Un vincolo di questo tipo si dice \emph{morbido}, in contrapposizione a quello
 \emph{rigido} \eqref{eq:tensione}. Conviene fissare alcuni fatti.
 \begin{itemize}
-  \item \emph{Il problema ha sempre punti ammissibili.} Presa una $u_k$
+  \item \emph{Il problema ha sempre punti ammissibili.} Presa una $\vett{u}_k$
         qualunque che rispetti \eqref{eq:limiti} e \eqref{eq:somma}, basta
         scegliere $\varepsilon_y$ abbastanza grande perché la \eqref{eq:morbido} valga per
         tutte le coppie $(j,n)$.
@@ -738,7 +960,7 @@ Un vincolo di questo tipo si dice \emph{morbido}, in contrapposizione a quello
         soluzione; nel modello, per semplicità, $\varepsilon_y$ è sempre presente.
 \end{itemize}
 
-\subsection{Le righe di $A$ e di $b$}
+\subsection{Le righe di $A$ e di $\vett{b}$}
 
 Applicando alla \eqref{eq:morbido} le mosse della
 sezione~\ref{sec:regola-vincolo}, cioè incognite a sinistra, numeri a destra e
@@ -767,7 +989,7 @@ posizione di $\varepsilon_y$, cioè l'ultimo, $H_{n_z n_z}$,
 
 \section{Il costo}\label{sec:costo}
 
-Restano da scrivere gli altri elementi di $H$ e il vettore $f$. Il costo è la
+Restano da scrivere gli altri elementi di $H$ e il vettore $\vett{f}$. Il costo è la
 somma di tre parti: il termine sulle correnti, comune alle tre formulazioni;
 il termine $W \varepsilon_y^2$, appena visto; la parte propria di ciascuna formulazione.
 Le formulazioni $J_m$ e $J_\Delta$ portano con sé anche dei vincoli, che sono
@@ -776,7 +998,7 @@ descritti insieme al costo da cui nascono.
 \subsection{Il termine sulle correnti}
 
 Il termine $\rho \sum_n (u^n_k)^2$ contiene il quadrato di ogni corrente, con
-coefficiente $\rho$. Poiché $u^n_k$ occupa la posizione $n$ di $z$,
+coefficiente $\rho$. Poiché $u^n_k$ occupa la posizione $n$ di $\vett{z}$,
 \begin{equation}
   H_{nn} = 2\rho , \qquad n = 1,\dots,N .
   \label{eq:peso-u}
@@ -812,8 +1034,8 @@ dell'orizzonte, $j = 1$, porta nel costo due addendi, uno per cella:
 Nel risultato ci sono i quadrati delle due correnti, le due correnti al primo
 grado e una costante. Manca il prodotto $u^1_k u^2_k$, perché ciascun binomio
 contiene una sola corrente. Le correnti $u^1_k$ e $u^2_k$ occupano le posizioni 1 e
-2 di $z$, quindi per la regola della sezione~\ref{sec:regola-costo} questo
-passo contribuisce a $H$ e a $f$ con
+2 di $\vett{z}$, quindi per la regola della sezione~\ref{sec:regola-costo} questo
+passo contribuisce a $H$ e a $\vett{f}$ con
 \[
   \begin{bmatrix} H_{11} & H_{12} \\ H_{21} & H_{22} \end{bmatrix}
   \;\leftarrow\;
@@ -852,7 +1074,7 @@ della sezione~\ref{sec:regola-costo} dà
 \end{equation}
 Non ci sono prodotti misti, perché ogni binomio contiene una sola incognita:
 il blocco di $H$ relativo alle correnti è diagonale. $J_t$ non richiede
-variabili $\varepsilon$.
+variabili $\vett{\varepsilon}$.
 
 \paragraph{Lettura della formula.} Dimenticando per un momento i vincoli, il
 costo è la somma di $N$ parabole, una per cella, e ciascuna ha il minimo in
@@ -887,7 +1109,7 @@ nella forma \eqref{eq:qp}.
 Il rimedio è introdurre per ogni passo $j$ una nuova incognita
 $\varepsilon_j$, e chiedere che stia sotto le tensioni di tutte le celle:
 \begin{equation}
-  \min_{u_k,\,\varepsilon,\,\varepsilon_y} \;\;
+  \min_{\vett{u}_k,\,\vett{\varepsilon},\,\varepsilon_y} \;\;
      -\sum_{j=1}^{p} \varepsilon_j + \rho \sum_{n=1}^{N} (u^n_k)^2 + W \varepsilon_y^2
   \qquad \text{con} \qquad
   \varepsilon_j \le y^n_{k+j}
@@ -897,7 +1119,7 @@ $\varepsilon_j$, e chiedere che stia sotto le tensioni di tutte le celle:
 oltre ai vincoli già visti. $\varepsilon_j$ è un \emph{minorante} delle
 tensioni al passo $j$: un livello sotto il quale non scende nessuna cella.
 
-\paragraph{Perché le due scritture sono equivalenti.} Si fissi una $u_k$
+\paragraph{Perché le due scritture sono equivalenti.} Si fissi una $\vett{u}_k$
 qualunque. I vincoli della \eqref{eq:jm-eps} dicono che $\varepsilon_j$ non
 può superare nessuna delle $N$ tensioni
 $y^1_{k+j}, \dots, y^N_{k+j}$, cioè che
@@ -907,16 +1129,16 @@ consentito:
 \[
   \varepsilon_j = \min_{n}\, y^n_{k+j} .
 \]
-Con questa scelta il costo della \eqref{eq:jm-eps} coincide con $J_m(u_k)$, a
+Con questa scelta il costo della \eqref{eq:jm-eps} coincide con $J_m(\vett{u}_k)$, a
 parte il termine $W \varepsilon_y^2$. Rendere minimo il costo rispetto a tutte le
-incognite equivale quindi a rendere minimo $J_m$ rispetto a $u_k$: le due
+incognite equivale quindi a rendere minimo $J_m$ rispetto a $\vett{u}_k$: le due
 scritture hanno la stessa soluzione. In breve, il costo spinge
 $\varepsilon_j$ verso l'alto e i vincoli lo fermano all'altezza della cella
 più bassa. Basta il vincolo da un solo lato (Remark~2 del paper): non serve
 imporre che $\varepsilon_j$ sia \emph{uguale} al minimo, perché ci pensa il
 costo.
 
-\paragraph{Righe di $A$ e di $b$.} Sostituendo la \eqref{eq:pred} nel vincolo
+\paragraph{Righe di $A$ e di $\vett{b}$.} Sostituendo la \eqref{eq:pred} nel vincolo
 $\varepsilon_j \le y^n_{k+j}$ e portando le incognite a sinistra:
 \begin{equation}
   \varepsilon_j - d_{j,n}\,u^n_k \;\le\; Y^\lib_{j,n} ,
@@ -926,14 +1148,14 @@ $\varepsilon_j \le y^n_{k+j}$ e portando le incognite a sinistra:
 Sono altre $pN$ righe, ciascuna con due coefficienti non nulli: $+1$ nella
 colonna di $\varepsilon_j$ e $-d_{j,n}$ nella colonna di $u^n_k$.
 
-\paragraph{Elementi di $H$ e di $f$.} Nel costo ogni $\varepsilon_j$ compare
+\paragraph{Elementi di $H$ e di $\vett{f}$.} Nel costo ogni $\varepsilon_j$ compare
 al primo grado con coefficiente $-1$, e non compare al quadrato:
 \begin{equation}
   f_{N+j} = -1 , \qquad H_{N+j,\,N+j} = 0 , \qquad j = 1,\dots,p .
   \label{eq:jm-hf}
 \end{equation}
 Per le correnti resta solo la \eqref{eq:peso-u}, e $f_n = 0$. Nelle
-$\varepsilon$ il costo è di primo grado: $H$ ha degli zeri sulla diagonale, ed
+$\vett{\varepsilon}$ il costo è di primo grado: $H$ ha degli zeri sulla diagonale, ed
 è semidefinita positiva ma non definita positiva.
 
 \subsection{$J_\Delta$: minima differenza tra le celle}\label{sec:jd}
@@ -945,7 +1167,7 @@ $\varepsilon_{p+j}$, che devono stare \emph{sopra} tutte le tensioni e ne sono
 quindi dei \emph{maggioranti}:
 \begin{equation}
 \begin{aligned}
-  & \min_{u_k,\,\varepsilon,\,\varepsilon_y} \;\;
+  & \min_{\vett{u}_k,\,\vett{\varepsilon},\,\varepsilon_y} \;\;
      \sum_{j=1}^{p} \varepsilon_{p+j} - \sum_{j=1}^{p} \varepsilon_j
      + \rho \sum_{n=1}^{N} (u^n_k)^2 + W \varepsilon_y^2 \\[4pt]
   & \text{con} \qquad
@@ -954,7 +1176,7 @@ quindi dei \emph{maggioranti}:
 \end{aligned}
 \label{eq:jd-eps}
 \end{equation}
-L'equivalenza si dimostra come prima. Fissata $u_k$, il costo spinge
+L'equivalenza si dimostra come prima. Fissata $\vett{u}_k$, il costo spinge
 $\varepsilon_j$ verso l'alto e $\varepsilon_{p+j}$ verso il basso; i vincoli li
 fermano rispettivamente sulla cella più bassa e sulla più alta. Nella soluzione
 \[
@@ -1001,7 +1223,7 @@ vincolo di uguaglianza:
 \begin{equation}
   A_{eq} = \bigl[\; \underbrace{1 \;\; \cdots \;\; 1}_{N}
               \;\; \underbrace{0 \;\; \cdots \;\; 0}_{n_z - N} \;\bigr] ,
-  \qquad b_{eq} = 0 .
+  \qquad \vett{b}_{eq} = 0 .
   \label{eq:uguaglianza}
 \end{equation}
 \texttt{quadprog} accetterebbe i limiti delle incognite anche come dati a
@@ -1012,7 +1234,7 @@ parte; nel modello sono scritti come righe di $A$, il che è equivalente.
 Le sezioni dalla~\ref{sec:vincolo-tensione} alla~\ref{sec:rimanenti} hanno
 ricavato i pezzi del problema uno alla volta, ciascuno con la sua
 giustificazione. Qui sono rimessi in fila, senza più giustificazioni, come una
-procedura da eseguire: quali elementi di $H$, $f$, $A$ e $b$ si scrivono, in
+procedura da eseguire: quali elementi di $H$, $\vett{f}$, $A$ e $\vett{b}$ si scrivono, in
 quale ordine e con quale valore. È la stessa procedura che segue il codice.
 
 \subsection{Dimensioni e posizioni}\label{sec:dimensioni}
@@ -1026,21 +1248,21 @@ sono
   n_{dis} = n_J\,pN + 2N + 1 .
   \label{eq:ndis}
 \end{equation}
-Il primo conta le $N$ correnti, le $(n_J-1)\,p$ variabili $\varepsilon$ e la
+Il primo conta le $N$ correnti, le $(n_J-1)\,p$ variabili $\vett{\varepsilon}$ e la
 variabile $\varepsilon_y$. Il secondo conta $n_J$ blocchi di $pN$ vincoli (quello di tensione
 minima, più uno per i minoranti e uno per i maggioranti quando ci sono), i
 $2N$ limiti di corrente e il segno di $\varepsilon_y$. Con i valori del progetto, $N = 3$
 e $p = 30$: 4 incognite e 97 vincoli per $J_t$, 34 e 187 per $J_m$, 64 e 277
 per $J_\Delta$.
 
-La posizione di un'incognita nel vettore $z$ decide tre cose insieme: il
+La posizione di un'incognita nel vettore $\vett{z}$ decide tre cose insieme: il
 numero della sua colonna in $A$ e in $A_{eq}$, il numero del suo elemento in
-$f$, e il numero del suo elemento sulla diagonale di $H$.
+$\vett{f}$, e il numero del suo elemento sulla diagonale di $H$.
 
 \begin{center}
 \begin{tabular}{llll}
 \toprule
-Incognita & & Posizione in $z$ & Presente in \\
+Incognita & & Posizione in $\vett{z}$ & Presente in \\
 \midrule
 corrente $u^n_k$ & $n = 1,\dots,N$ & $n$ & $J_t$, $J_m$, $J_\Delta$ \\
 minorante $\varepsilon_j$ & $j = 1,\dots,p$ & $N + j$ & $J_m$, $J_\Delta$ \\
@@ -1050,9 +1272,9 @@ variabile $\varepsilon_y$ & & $n_z$, l'ultima & $J_t$, $J_m$, $J_\Delta$ \\
 \end{tabular}
 \end{center}
 
-\subsection{Costruzione di $H$ e di $f$}\label{sec:passi-costo}
+\subsection{Costruzione di $H$ e di $\vett{f}$}\label{sec:passi-costo}
 
-Si parte da una matrice $H$ di $n_z \times n_z$ zeri e da un vettore $f$ di
+Si parte da una matrice $H$ di $n_z \times n_z$ zeri e da un vettore $\vett{f}$ di
 $n_z$ zeri. Si scrivono poi, nell'ordine, solo gli elementi elencati qui sotto;
 tutti gli altri restano nulli.
 \begin{enumerate}
@@ -1064,7 +1286,7 @@ tutti gli altri restano nulli.
         \mbox{$H_{nn} = 2\rho$}.
   \item \emph{Inseguimento} (solo $J_t$). Per ogni cella $n = 1,\dots,N$ si
         calcolano le due somme sui passi della \eqref{eq:jt-hf}; la prima si
-        aggiunge all'elemento già scritto al passo 2, la seconda va in $f$:
+        aggiunge all'elemento già scritto al passo 2, la seconda va in $\vett{f}$:
         \[
           H_{nn} = 2\rho + 2\sum_{j=1}^{p} d_{j,n}^2 , \qquad
           f_n = 2\sum_{j=1}^{p} d_{j,n}\,\bigl(Y^\lib_{j,n} - y^0_{k+j}\bigr) .
@@ -1077,28 +1299,28 @@ tutti gli altri restano nulli.
 \end{enumerate}
 Nessun passo scrive fuori dalla diagonale di $H$: la matrice è diagonale in
 tutte e tre le formulazioni. Scrivendo per esteso la diagonale di $H$ e il
-vettore $f$, il risultato è
+vettore $\vett{f}$, il risultato è
 \begin{align*}
   J_t: \quad
     & \operatorname{diag}(H) = \bigl(\, H_{11},\, \dots,\, H_{NN},\; 2W \,\bigr) ,
-    && f = \bigl(\, f_1,\, \dots,\, f_N,\; 0 \,\bigr) , \\[6pt]
+    && \vett{f} = \bigl(\, f_1,\, \dots,\, f_N,\; 0 \,\bigr) , \\[6pt]
   J_m: \quad
     & \operatorname{diag}(H) = \bigl(\, \underbrace{2\rho,\, \dots,\, 2\rho}_{N},\;
         \underbrace{0,\, \dots,\, 0}_{p},\; 2W \,\bigr) ,
-    && f = \bigl(\, \underbrace{0,\, \dots,\, 0}_{N},\;
+    && \vett{f} = \bigl(\, \underbrace{0,\, \dots,\, 0}_{N},\;
         \underbrace{-1,\, \dots,\, -1}_{p},\; 0 \,\bigr) , \\[6pt]
   J_\Delta: \quad
     & \operatorname{diag}(H) = \bigl(\, \underbrace{2\rho,\, \dots,\, 2\rho}_{N},\;
         \underbrace{0,\, \dots,\, 0}_{2p},\; 2W \,\bigr) ,
-    && f = \bigl(\, \underbrace{0,\, \dots,\, 0}_{N},\;
+    && \vett{f} = \bigl(\, \underbrace{0,\, \dots,\, 0}_{N},\;
         \underbrace{-1,\, \dots,\, -1}_{p},\;
         \underbrace{+1,\, \dots,\, +1}_{p},\; 0 \,\bigr) ,
 \end{align*}
 dove per $J_t$ gli elementi $H_{nn}$ e $f_n$ sono quelli del passo 3.
 
-\subsection{Costruzione di $A$ e di $b$}\label{sec:passi-vincoli}
+\subsection{Costruzione di $A$ e di $\vett{b}$}\label{sec:passi-vincoli}
 
-Si parte da una matrice $A$ di $n_{dis} \times n_z$ zeri e da un vettore $b$ di
+Si parte da una matrice $A$ di $n_{dis} \times n_z$ zeri e da un vettore $\vett{b}$ di
 $n_{dis}$ zeri. I vincoli si scrivono uno dopo l'altro, ciascuno in una riga
 nuova, cominciando dalla prima. Scrivere un vincolo nella riga $q$ significa
 due cose: mettere i suoi coefficienti negli elementi $A_{q,\ell}$, dove $\ell$ è la
@@ -1108,24 +1330,24 @@ $b_q$. I vincoli si susseguono in sei blocchi, in quest'ordine.
   \item \emph{Tensione minima} (tutte le formulazioni),
         \eqref{eq:riga-tensione}. Per ogni cella $n = 1,\dots,N$ e, al suo
         interno, per ogni passo $j = 1,\dots,p$, una riga con $-d_{j,n}$ nella
-        colonna di $u^n_k$ e $-1$ nella colonna di $\varepsilon_y$; in $b$ va
+        colonna di $u^n_k$ e $-1$ nella colonna di $\varepsilon_y$; in $\vett{b}$ va
         $Y^\lib_{j,n} - y_{\min}$.
   \item \emph{Minoranti} (solo $J_m$ e $J_\Delta$),
         \eqref{eq:riga-minorante}. Con lo stesso doppio ciclo, una riga con
         $-d_{j,n}$ nella colonna di $u^n_k$ e $+1$ nella colonna di
-        $\varepsilon_j$; in $b$ va $Y^\lib_{j,n}$.
+        $\varepsilon_j$; in $\vett{b}$ va $Y^\lib_{j,n}$.
   \item \emph{Maggioranti} (solo $J_\Delta$), \eqref{eq:riga-maggiorante}.
         Ancora lo stesso doppio ciclo, una riga con $d_{j,n}$ nella colonna di
-        $u^n_k$ e $-1$ nella colonna di $\varepsilon_{p+j}$; in $b$ va
+        $u^n_k$ e $-1$ nella colonna di $\varepsilon_{p+j}$; in $\vett{b}$ va
         $-Y^\lib_{j,n}$.
   \item \emph{Limite superiore delle correnti} (tutte le formulazioni),
         \eqref{eq:riga-limiti}. Per ogni cella $n$, una riga con $+1$ nella
-        colonna di $u^n_k$; in $b$ va $u_{\max}$.
+        colonna di $u^n_k$; in $\vett{b}$ va $u_{\max}$.
   \item \emph{Limite inferiore delle correnti} (tutte le formulazioni),
         \eqref{eq:riga-limiti}. Per ogni cella $n$, una riga con $-1$ nella
-        colonna di $u^n_k$; in $b$ va $-u_{\min}$.
+        colonna di $u^n_k$; in $\vett{b}$ va $-u_{\min}$.
   \item \emph{Segno di $\varepsilon_y$} (tutte le formulazioni), \eqref{eq:riga-e}. Una
-        sola riga, con $-1$ nella colonna di $\varepsilon_y$; in $b$ va $0$.
+        sola riga, con $-1$ nella colonna di $\varepsilon_y$; in $\vett{b}$ va $0$.
 \end{enumerate}
 Nei primi tre blocchi i vincoli sono quindi ordinati per cella: prima i $p$
 passi della cella 1, poi quelli della cella 2, e così via. La tabella riassume
@@ -1158,19 +1380,19 @@ scritto.
 
 Resta il vincolo di uguaglianza \eqref{eq:uguaglianza}, che è una riga sola:
 $A_{eq}$ ha $1$ nelle colonne delle correnti, cioè nelle prime $N$, e zero
-nelle altre; $b_{eq} = 0$.
+nelle altre; $\vett{b}_{eq} = 0$.
 
 \subsection{Il risultato a colpo d'occhio}\label{sec:blocchi}
 
 La matrice $A$ costruita in questo modo ha una struttura a blocchi, che si
-vede bene con tre simboli. Sia $y^\lib$ il vettore di lunghezza $pN$ ottenuto
+vede bene con tre simboli. Sia $\vett{y}^\lib$ il vettore di lunghezza $pN$ ottenuto
 mettendo in fila le colonne di $Y^\lib$, cioè nell'ordine in cui sono scritti i
 vincoli; $\Dc$ la matrice $pN \times N$ che ha, nella colonna $n$, i
 coefficienti $d_{1,n}, \dots, d_{p,n}$ in corrispondenza delle righe della
 cella $n$, e zeri altrove; $\Pc$ la matrice $pN \times p$ formata da $N$ copie
 della matrice identità $I_p$, una sopra l'altra:
 \[
-  y^\lib = \begin{bmatrix} Y^\lib_{\cdot,1} \\ \vdots \\ Y^\lib_{\cdot,N} \end{bmatrix},
+  \vett{y}^\lib = \begin{bmatrix} Y^\lib_{\cdot,1} \\ \vdots \\ Y^\lib_{\cdot,N} \end{bmatrix},
   \qquad
   \Dc = \begin{bmatrix}
           d_{\cdot,1} & & \\
@@ -1182,13 +1404,13 @@ della matrice identità $I_p$, una sopra l'altra:
 \]
 dove $d_{\cdot,n}$ e $Y^\lib_{\cdot,n}$ sono le colonne $n$ di $d$ e di $Y^\lib$.
 Con $\uno$ si indica un vettore di tutti uni. Per $J_\Delta$, la formulazione
-più ricca, le incognite sono nell'ordine le correnti $u_k$, i minoranti
-$\varepsilon_{1..p}$, i maggioranti $\varepsilon_{p+1..2p}$ ed $\varepsilon_y$, e i vincoli
+più ricca, le incognite sono nell'ordine le correnti $\vett{u}_k$, i minoranti
+$\vett{\varepsilon}_{1..p}$, i maggioranti $\vett{\varepsilon}_{p+1..2p}$ ed $\varepsilon_y$, e i vincoli
 di disuguaglianza sono
 \[
   \underbrace{
   \bordermatrix{
-      & u_k & \varepsilon_{1..p} & \varepsilon_{p+1..2p} & \varepsilon_y \cr
+      & \vett{u}_k & \vett{\varepsilon}_{1..p} & \vett{\varepsilon}_{p+1..2p} & \varepsilon_y \cr
     \text{1. tensione minima} & -\Dc & 0 & 0 & -\uno \cr
     \text{2. minoranti}       & -\Dc & \Pc & 0 & 0 \cr
     \text{3. maggioranti}     & \Dc & 0 & -\Pc & 0 \cr
@@ -1196,16 +1418,16 @@ di disuguaglianza sono
     \text{5. limite inferiore} & -I_N & 0 & 0 & 0 \cr
     \text{6. segno di } \varepsilon_y     & 0 & 0 & 0 & -1 \cr
   }}_{A}
-  \; z \;\le\;
+  \; \vett{z} \;\le\;
   \underbrace{
   \begin{bmatrix}
-    y^\lib - y_{\min}\,\uno \\ y^\lib \\ -y^\lib \\ u_{\max}\,\uno \\ -u_{\min}\,\uno \\ 0
-  \end{bmatrix}}_{b} .
+    \vett{y}^\lib - y_{\min}\,\uno \\ \vett{y}^\lib \\ -\vett{y}^\lib \\ u_{\max}\,\uno \\ -u_{\min}\,\uno \\ 0
+  \end{bmatrix}}_{\vett{b}} .
 \]
 Ogni riga di questo schema è uno dei sei blocchi della procedura, e ogni
 colonna un gruppo di incognite. Per $J_m$ si tolgono la riga dei maggioranti e
-la colonna di $\varepsilon_{p+1..2p}$; per $J_t$ anche la riga dei minoranti e
-la colonna di $\varepsilon_{1..p}$. Due cose si vedono a colpo d'occhio: $A$ è
+la colonna di $\vett{\varepsilon}_{p+1..2p}$; per $J_t$ anche la riga dei minoranti e
+la colonna di $\vett{\varepsilon}_{1..p}$. Due cose si vedono a colpo d'occhio: $A$ è
 quasi tutta fatta di zeri, con al più due coefficienti non nulli per riga, e
 le correnti delle diverse celle non compaiono mai nello stesso vincolo di
 disuguaglianza. Le lega soltanto il vincolo di uguaglianza.
@@ -1214,21 +1436,25 @@ disuguaglianza. Le lega soltanto il vincolo di uguaglianza.
 
 Nel QP compaiono come incognite solo le correnti, oltre alle variabili di
 servizio: gli stati delle celle lungo l'orizzonte non sono incognite, perché
-sono già stati espressi in funzione di $u_k$, prima per sostituzione e poi con
+sono già stati espressi in funzione di $\vett{u}_k$, prima per sostituzione e poi con
 la \eqref{eq:pred}. È la cosiddetta forma \emph{condensata}. Il paper conta
 invece $(2p+1)N$ incognite per $J_t$: alle $N$ correnti si aggiungono i due
 stati di ogni cella a ogni passo, cioè $2pN$ numeri, legati alle correnti da
 vincoli di uguaglianza. Le due forme hanno la stessa soluzione; quella
 condensata è più piccola. Il perché, e dove finiscono quei vincoli di
 uguaglianza, è spiegato alla fine della sezione~\ref{sec:vincoli-problema}.
+Allo stesso modo le correnti future non sono impilate in un vettore di
+$(p+1)N$ incognite: con la corrente costante sull'orizzonte la sequenza si
+riduce a $\vett{u}_k$, e la matrice delle derivate della forma classica si riduce ai
+coefficienti $d_{j,n}$, \eqref{eq:s-somma}, alla fine della stessa sezione.
 
 \section{Il punto di partenza}\label{sec:partenza}
 
-Il blocco prepara anche un punto $z_{\mathrm{iniz}}$ da cui il solutore parte. È la mossa
+Il blocco prepara anche un punto $\vett{z}_{\mathrm{iniz}}$ da cui il solutore parte. È la mossa
 del passo precedente, completata con i valori delle variabili di servizio che
 la rendono ammissibile:
 \begin{equation}
-  u_k = \bar u , \qquad
+  \vett{u}_k = \bar{\vett{u}} , \qquad
   \varepsilon_j = \min_{n}\, \bar Y_{j,n} , \qquad
   \varepsilon_{p+j} = \max_{n}\, \bar Y_{j,n} , \qquad
   \varepsilon_y = \max\Bigl(0,\; y_{\min} - \min_{j,n}\, \bar Y_{j,n}\Bigr) .
@@ -1236,7 +1462,7 @@ la rendono ammissibile:
 \end{equation}
 
 \paragraph{Perché è ammissibile.} Tutto dipende da un'osservazione: nel punto
-$u_k = \bar u$ la predizione linearizzata vale esattamente $\bar Y$. Infatti per
+$\vett{u}_k = \bar{\vett{u}}$ la predizione linearizzata vale esattamente $\bar Y$. Infatti per
 la \eqref{eq:pred}
 $Y^\lib_{j,n} + d_{j,n}\,\bar u^n = \bar Y_{j,n}$. I vincoli si controllano
 allora uno per uno.
@@ -1248,9 +1474,9 @@ allora uno per uno.
         tensioni $\bar Y_{j,1}, \dots, \bar Y_{j,N}$, quindi non ne supera
         nessuna; $\varepsilon_{p+j}$ è la più alta, quindi nessuna la supera.
   \item \emph{Segno di $\varepsilon_y$}: $\varepsilon_y$ è il massimo tra zero e un altro numero.
-  \item \emph{Limiti e somma delle correnti}: $\bar u$ è la soluzione del QP
+  \item \emph{Limiti e somma delle correnti}: $\bar{\vett{u}}$ è la soluzione del QP
         del passo precedente, che rispettava \eqref{eq:limiti} e
-        \eqref{eq:somma}. Al primo passo del modello $\bar u = 0$, che le
+        \eqref{eq:somma}. Al primo passo del modello $\bar{\vett{u}} = 0$, che le
         rispetta purché $u_{\min} \le 0 \le u_{\max}$.
 \end{itemize}
 
@@ -1259,7 +1485,7 @@ active-set un punto da cui partire (sezione~\ref{sec:attivi}): un punto già
 ammissibile, e di solito vicino alla soluzione, perché le correnti di
 bilanciamento cambiano poco da un passo all'altro. Il secondo è di sicurezza:
 se \texttt{quadprog} non restituisce una soluzione, il blocco
-\file{Solutore_QP} restituisce $z_{\mathrm{iniz}}$, cioè mantiene la mossa precedente.
+\file{Solutore_QP} restituisce $\vett{z}_{\mathrm{iniz}}$, cioè mantiene la mossa precedente.
 ``Continuare come prima'' è sempre una scelta ammissibile.
 
 \section{Proprietà del problema}\label{sec:proprieta}
@@ -1271,7 +1497,7 @@ problema è stato costruito.
         $2\rho$ (più una somma di quadrati per $J_t$), zero oppure $2W$:
         nessuno è negativo, quindi $H$ è semidefinita positiva. Ogni minimo
         locale è globale.
-  \item \emph{Ha punti ammissibili.} Uno è $z_{\mathrm{iniz}}$.
+  \item \emph{Ha punti ammissibili.} Uno è $\vett{z}_{\mathrm{iniz}}$.
   \item \emph{Ha una soluzione.} Per $J_t$ tutti gli elementi della diagonale
         sono positivi: $H$ è definita positiva e la soluzione esiste. Per
         $J_m$ e $J_\Delta$ $H$ ha degli zeri sulla diagonale, ma il costo è
@@ -1288,16 +1514,16 @@ problema è stato costruito.
         segmento il costo sarebbe costante. Ma lungo un segmento il costo è un
         polinomio di secondo grado nel parametro che lo percorre, e il
         coefficiente del termine di secondo grado è
-        $\rho \sum_n (\Delta u^n_k)^2 + W\,(\Delta \varepsilon_y)^2$, dove $\Delta u_k$ e
+        $\rho \sum_n (\Delta u^n_k)^2 + W\,(\Delta \varepsilon_y)^2$, dove $\Delta \vett{u}_k$ e
         $\Delta \varepsilon_y$ sono le differenze tra le due soluzioni. Il costo può essere
         costante solo se questo coefficiente è nullo, cioè se le due soluzioni
-        hanno le stesse correnti e la stessa $\varepsilon_y$. Fissata $u_k$, d'altra parte, i
-        valori migliori delle $\varepsilon$ sono determinati: il minimo e il
+        hanno le stesse correnti e la stessa $\varepsilon_y$. Fissata $\vett{u}_k$, d'altra parte, i
+        valori migliori delle $\vett{\varepsilon}$ sono determinati: il minimo e il
         massimo tra le celle. Le due soluzioni coincidono.
 \end{itemize}
 C'è infine una ragione per cui nel modello si usa il metodo active-set. In
-$J_m$ e $J_\Delta$ il costo è di primo grado nelle $\varepsilon$, e nella
-soluzione ogni $\varepsilon$ sta esattamente su un vincolo, cioè sulla tensione
+$J_m$ e $J_\Delta$ il costo è di primo grado nelle $\vett{\varepsilon}$, e nella
+soluzione ogni componente di $\vett{\varepsilon}$ sta esattamente su un vincolo, cioè sulla tensione
 di una cella. Un metodo che lavora con i vincoli attivi individua questi
 vincoli in modo esatto, invece di avvicinarvisi soltanto.
 
@@ -1314,10 +1540,10 @@ blocco di quella della tensione:
 Il riferimento diventa $s^0_{k+j}$, il SOC della cella nominale. Le sostituzioni da
 fare sono due, e riguardano solo le parti che contengono $\sigma$.
 \begin{itemize}
-  \item \emph{Nel costo e nei vincoli sulle $\varepsilon$}, cioè nelle
+  \item \emph{Nel costo e nei vincoli sulle $\vett{\varepsilon}$}, cioè nelle
         \eqref{eq:jt-hf}, \eqref{eq:riga-minorante} e
         \eqref{eq:riga-maggiorante}, al posto di $Y^\lib$ e $d$ si usano $S^\lib$ ed
-        $\alpha$. Nel punto di partenza \eqref{eq:z0} le $\varepsilon$ si calcolano
+        $\alpha$. Nel punto di partenza \eqref{eq:z0} le $\vett{\varepsilon}$ si calcolano
         da $\bar S$ invece che da $\bar Y$.
   \item \emph{Il vincolo di tensione minima} \eqref{eq:riga-tensione} e il
         valore di $\varepsilon_y$ nella \eqref{eq:z0} restano com'erano: il vincolo
@@ -1338,7 +1564,7 @@ scelti per fare i conti a mano: $N = 2$ celle e $p = 2$ passi. I dati sono
   \text{V} , \quad
   d = \begin{bmatrix} -0{,}010 & -0{,}011 \\ -0{,}012 & -0{,}013 \end{bmatrix}
   \frac{\text{V}}{\text{A}} , \quad
-  \bar u = \begin{bmatrix} 0{,}5 \\ -0{,}5 \end{bmatrix} \text{A} , \quad
+  \bar{\vett{u}} = \begin{bmatrix} 0{,}5 \\ -0{,}5 \end{bmatrix} \text{A} , \quad
   \begin{bmatrix} y^0_{k+1} \\ y^0_{k+2} \end{bmatrix}
   = \begin{bmatrix} 3{,}680 \\ 3{,}669 \end{bmatrix} \text{V} ,
 \]
@@ -1359,8 +1585,8 @@ Senza bilanciamento la cella 1 starebbe un po' più in alto di quanto dice
 $\bar Y$, e la cella 2 un po' più in basso: la mossa precedente stava già
 avvicinando le due celle.
 
-\paragraph{$J_t$: costruzione di $H$ e di $f$.} Le incognite sono
-$z = (u^1_k, u^2_k, \varepsilon_y)$: $n_z = 3$, le correnti occupano le posizioni 1 e 2 ed
+\paragraph{$J_t$: costruzione di $H$ e di $\vett{f}$.} Le incognite sono
+$\vett{z} = (u^1_k, u^2_k, \varepsilon_y)$: $n_z = 3$, le correnti occupano le posizioni 1 e 2 ed
 $\varepsilon_y$ la posizione 3. Si seguono i passi della sezione~\ref{sec:passi-costo},
 con $\rho = 10^{-4}$.
 \begin{enumerate}
@@ -1389,10 +1615,10 @@ $-0{,}0255$ e $-0{,}0275$. I passi 4 e 5 non riguardano $J_t$. In tutto:
         0 & 0 & 2000
       \end{bmatrix} ,
   \qquad
-  f = \begin{bmatrix} -1{,}148 \cdot 10^{-3} \\ 1{,}276 \cdot 10^{-3} \\ 0 \end{bmatrix} .
+  \vett{f} = \begin{bmatrix} -1{,}148 \cdot 10^{-3} \\ 1{,}276 \cdot 10^{-3} \\ 0 \end{bmatrix} .
 \]
 
-\paragraph{$J_t$: costruzione di $A$ e di $b$.} I vincoli di disuguaglianza
+\paragraph{$J_t$: costruzione di $A$ e di $\vett{b}$.} I vincoli di disuguaglianza
 sono $n_{dis} = 1 \cdot 4 + 4 + 1 = 9$. Seguendo i blocchi della
 sezione~\ref{sec:passi-vincoli}: il blocco 1 occupa le righe da 1 a 4, i
 blocchi 4 e 5 le righe da 5 a 8, il blocco 6 la riga 9. I blocchi 2 e 3 non ci
@@ -1422,8 +1648,8 @@ cella 2 al passo 1 sta nella riga $(n-1)\,p + j = (2-1) \cdot 2 + 1 = 3$. Nelle
 prime quattro righe i coefficienti $0{,}010$, $0{,}012$, \dots\ sono
 $-d_{j,n}$, scritti nella colonna della cella a cui si riferiscono, e i termini
 noti sono i margini $Y^\lib_{j,n} - 3{,}2$. Il vincolo di uguaglianza è
-$A_{eq} = [\,1 \;\; 1 \;\; 0\,]$, $b_{eq} = 0$, e il punto di partenza è
-$z_{\mathrm{iniz}} = (0{,}5;\; -0{,}5;\; 0)$.
+$A_{eq} = [\,1 \;\; 1 \;\; 0\,]$, $\vett{b}_{eq} = 0$, e il punto di partenza è
+$\vett{z}_{\mathrm{iniz}} = (0{,}5;\; -0{,}5;\; 0)$.
 
 \paragraph{La soluzione per $J_t$.} Senza vincoli le due parabole avrebbero il
 minimo in $u^1_k = -f_1/H_{11} = 1{,}669$~A e $u^2_k = -f_2/H_{22} = -1{,}636$~A:
@@ -1440,15 +1666,15 @@ tensione non interviene ed $\varepsilon_y = 0$. È il risultato che restituisce
 \texttt{quadprog}.
 
 \paragraph{Che cosa cambia per $J_m$.} Le incognite diventano
-$z = (u^1_k, u^2_k, \varepsilon_1, \varepsilon_2, \varepsilon_y)$: $n_z = 5$, i minoranti
-occupano le posizioni 3 e 4 ed $\varepsilon_y$ la posizione 5. Per $H$ e $f$ si eseguono
+$\vett{z} = (u^1_k, u^2_k, \varepsilon_1, \varepsilon_2, \varepsilon_y)$: $n_z = 5$, i minoranti
+occupano le posizioni 3 e 4 ed $\varepsilon_y$ la posizione 5. Per $H$ e $\vett{f}$ si eseguono
 i passi 1, 2 e 4 della sezione~\ref{sec:passi-costo}:
 \[
   \operatorname{diag}(H) = \bigl(\, 2\rho,\; 2\rho,\; 0,\; 0,\; 2000 \,\bigr) ,
   \qquad
-  f = \bigl(\, 0,\; 0,\; -1,\; -1,\; 0 \,\bigr) .
+  \vett{f} = \bigl(\, 0,\; 0,\; -1,\; -1,\; 0 \,\bigr) .
 \]
-Per $A$ e $b$ compare il blocco 2, subito dopo quello di tensione. Le prime
+Per $A$ e $\vett{b}$ compare il blocco 2, subito dopo quello di tensione. Le prime
 quattro righe sono quelle di prima, con il $-1$ di $\varepsilon_y$ che ora sta nella
 quinta colonna; seguono le righe da 5 a 8,
 \[
@@ -1459,22 +1685,22 @@ quinta colonna; seguono le righe da 5 a 8,
     \text{7:\; minorante, cella 2, } j = 1 & 0 & 0{,}011 & 1 & 0 & 0 \cr
     \text{8:\; minorante, cella 2, } j = 2 & 0 & 0{,}013 & 0 & 1 & 0 \cr
   }
-  \; z \;\le\;
+  \; \vett{z} \;\le\;
   \begin{bmatrix} 3{,}7050 \\ 3{,}6960 \\ 3{,}6545 \\ 3{,}6415 \end{bmatrix} ,
 \]
 e poi i limiti di corrente, che scendono alle righe da 9 a 12, e il segno di
 $\varepsilon_y$, alla riga 13. In ogni riga del blocco 2 il coefficiente $+1$ sta nella
 colonna del minorante del passo corrispondente: $\varepsilon_1$ per $j = 1$,
 $\varepsilon_2$ per $j = 2$. Il punto di partenza è
-$z_{\mathrm{iniz}} = (0{,}5;\; -0{,}5;\; 3{,}660;\; 3{,}648;\; 0)$: le due $\varepsilon$
+$\vett{z}_{\mathrm{iniz}} = (0{,}5;\; -0{,}5;\; 3{,}660;\; 3{,}648;\; 0)$: le due $\vett{\varepsilon}$
 sono le tensioni $\bar Y$ della cella più bassa.
 
 \paragraph{Che cosa cambia per $J_\Delta$.} Le incognite diventano
-$z = (u^1_k, u^2_k, \varepsilon_1, \varepsilon_2, \varepsilon_3, \varepsilon_4, \varepsilon_y)$:
+$\vett{z} = (u^1_k, u^2_k, \varepsilon_1, \varepsilon_2, \varepsilon_3, \varepsilon_4, \varepsilon_y)$:
 $n_z = 7$, i maggioranti occupano le posizioni 5 e 6 ed $\varepsilon_y$ la posizione 7.
 Ai passi di $J_m$ si aggiunge il passo 5, quindi
 $\operatorname{diag}(H) = (\, 2\rho,\, 2\rho,\, 0,\, 0,\, 0,\, 0,\, 2000 \,)$ e
-$f = (\, 0,\, 0,\, -1,\, -1,\, +1,\, +1,\, 0 \,)$. In $A$ compare anche il
+$\vett{f} = (\, 0,\, 0,\, -1,\, -1,\, +1,\, +1,\, 0 \,)$. In $A$ compare anche il
 blocco 3, nelle righe da 9 a 12,
 \[
   \bordermatrix{
@@ -1484,12 +1710,12 @@ blocco 3, nelle righe da 9 a 12,
     \text{11:\; maggiorante, cella 2, } j = 1 & 0 & -0{,}011 & 0 & 0 & -1 & 0 & 0 \cr
     \text{12:\; maggiorante, cella 2, } j = 2 & 0 & -0{,}013 & 0 & 0 & 0 & -1 & 0 \cr
   }
-  \; z \;\le\;
+  \,\vett{z}\,\le\,
   \begin{bmatrix} -3{,}7050 \\ -3{,}6960 \\ -3{,}6545 \\ -3{,}6415 \end{bmatrix} ,
 \]
 mentre i limiti di corrente scendono alle righe da 13 a 16 e il segno di $\varepsilon_y$
 alla riga 17. Il punto di partenza è
-$z_{\mathrm{iniz}} = (0{,}5;\; -0{,}5;\; 3{,}660;\; 3{,}648;\; 3{,}700;\; 3{,}690;\; 0)$.
+$\vett{z}_{\mathrm{iniz}} = (0{,}5;\; -0{,}5;\; 3{,}660;\; 3{,}648;\; 3{,}700;\; 3{,}690;\; 0)$.
 
 \paragraph{Le tre soluzioni a confronto.} Come nel progetto, il peso $\rho$ è
 diverso per le tre formulazioni: $10^{-4}$ per $J_t$, $5 \cdot 10^{-3}$ per
@@ -1547,7 +1773,7 @@ l'istruzione
 \noindent
 dove \texttt{sigma0} è il riferimento $\sigma^0_{k+j}$ della cella nominale,
 \file{Y_bar}, \file{S_bar}, \texttt{d} e \texttt{alfa} sono la predizione
-linearizzata e \file{u_bar} è la mossa precedente $\bar u$: hanno gli stessi
+linearizzata e \file{u_bar} è la mossa precedente $\bar{\vett{u}}$: hanno gli stessi
 nomi dei segnali del modello. La versione da leggere esegue la procedura della
 sezione~\ref{sec:completo} nello stesso ordine: ogni vincolo è scritto in una
 riga nuova di \texttt{A}, e la variabile \texttt{q} è il contatore di righe
@@ -1559,19 +1785,19 @@ variabili hanno il nome dei simboli del documento:
 \toprule
 Simbolo & Nome nel codice & Simbolo & Nome nel codice \\
 \midrule
-$\bar Y$, $d$ & \file{Y_bar}, \texttt{d} & $H$, $f$ & \texttt{H}, \texttt{f} \\
-$\bar S$, $\alpha$ & \file{S_bar}, \texttt{alfa} & $A$, $b$ & \texttt{A}, \texttt{b} \\
-$Y^\lib$ & \file{Y_lib} & $A_{eq}$, $b_{eq}$ & \texttt{Aeq}, \texttt{beq} \\
-$\bar u$ & \file{u_bar} & $z_{\mathrm{iniz}}$ & \file{z_iniziale} \\
+$\bar Y$, $d$ & \file{Y_bar}, \texttt{d} & $H$, $\vett{f}$ & \texttt{H}, \texttt{f} \\
+$\bar S$, $\alpha$ & \file{S_bar}, \texttt{alfa} & $A$, $\vett{b}$ & \texttt{A}, \texttt{b} \\
+$Y^\lib$ & \file{Y_lib} & $A_{eq}$, $\vett{b}_{eq}$ & \texttt{Aeq}, \texttt{beq} \\
+$\bar{\vett{u}}$ & \file{u_bar} & $\vett{z}_{\mathrm{iniz}}$ & \file{z_iniziale} \\
 $y^0_{k+j}$ & \texttt{sigma0(j)} & $n_z$, $n_{dis}$ & \file{n_z}, \file{n_dis} \\
-$\rho$, $W$ & \texttt{rho}, \texttt{W} & posizione di $\varepsilon_y$ in $z$ & \file{pos_epsilon_y} \\
+$\rho$, $W$ & \texttt{rho}, \texttt{W} & posizione di $\varepsilon_y$ in $\vett{z}$ & \file{pos_epsilon_y} \\
 $y_{\min}$, $u_{\min}$, $u_{\max}$ & \file{y_min}, \file{u_min}, \file{u_max} & formulazione $n_J$ & \file{n_J} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \noindent
-Nel costo e nei vincoli sulle $\varepsilon$ il codice usa \file{Sigma_bar},
+Nel costo e nei vincoli sulle $\vett{\varepsilon}$ il codice usa \file{Sigma_bar},
 \file{d_sigma} e \file{Sigma_lib}, riferite alla grandezza bilanciata
 $\sigma$: coincidono con \file{Y_bar}, \texttt{d} e \file{Y_lib} se si
 bilancia la tensione, e con le grandezze corrispondenti del SOC altrimenti

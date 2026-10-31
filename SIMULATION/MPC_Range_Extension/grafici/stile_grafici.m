@@ -16,7 +16,7 @@ st.controllo.nessuno = [137 135 129] / 255;
 st.controllo.Jt      = st.celle(1, :);
 st.controllo.Jm      = st.celle(2, :);
 st.controllo.Jdelta  = st.celle(3, :);
-st.controllo.Jt_rigido = st.celle(7, :);     % J_t con il vincolo di tensione rigido (simulink/Jt)
+st.controllo.Jt_rigido = st.celle(7, :);     % J_t con il vincolo di tensione rigido (Bilanciamento_MPC_Jt.slx)
 
 st.nome.nessuno = 'Senza bilanciamento';
 st.nome.Jt      = 'J_t';

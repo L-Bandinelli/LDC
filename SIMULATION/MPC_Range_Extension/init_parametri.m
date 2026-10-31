@@ -38,8 +38,8 @@ par.pacco.seme_casuale = 1;       % stesso seme = stesse celle a ogni esecuzione
 
 %% 3) Bilanciatore e MPC
 
-par.mpc.Tc    = 20;           % [s] passo di controllo T_c (T_s nel paper)
-par.mpc.p     = 30;           % orizzonte di predizione [passi]
+par.mpc.Tc    = 5;           % [s] passo di controllo T_c (T_s nel paper)
+par.mpc.p     = 3;           % orizzonte di predizione [passi]
 par.mpc.sigma = 'y';         % grandezza bilanciata: 'y' tensione, 's' SOC
 par.mpc.u_min = -2;          % [A] limiti della corrente di bilanciamento, eq. (6d)
 par.mpc.u_max =  2;          % [A]

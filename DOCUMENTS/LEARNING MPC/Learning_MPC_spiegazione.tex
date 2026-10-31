@@ -1,0 +1,2079 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,decorations.pathreplacing,babel}
+\usepackage[hidelinks]{hyperref}
+
+\setcounter{secnumdepth}{2}
+
+% ---------------------------------------------------------------------------
+% Ambienti
+% ---------------------------------------------------------------------------
+\theoremstyle{definition}
+\newtheorem{definizione}{Definizione}[section]
+\newtheorem{ipotesi}[definizione]{Ipotesi}
+\theoremstyle{plain}
+\newtheorem{teorema}[definizione]{Teorema}
+\newtheorem{lemma}[definizione]{Lemma}
+\newtheorem{proposizione}[definizione]{Proposizione}
+\theoremstyle{remark}
+\newtheorem{osservazione}[definizione]{Osservazione}
+
+% Riquadro per le idee chiave
+\newcommand{\ideachiave}[1]{%
+  \par\medskip\noindent
+  \fcolorbox{blue!50!black}{blue!4}{\begin{minipage}{0.96\textwidth}
+  \smallskip\textbf{Idea chiave.}\ #1\smallskip\end{minipage}}\par\medskip}
+
+% ---------------------------------------------------------------------------
+% Simboli
+% ---------------------------------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Zn}{\mathbb{Z}_{\ge 0}}
+\newcommand{\Xc}{\mathcal{X}}
+\newcommand{\Uc}{\mathcal{U}}
+\newcommand{\Xf}{\mathcal{X}_f}
+\newcommand{\SSet}{\mathcal{SS}}
+\newcommand{\CS}{\mathcal{CS}}
+\newcommand{\Mc}{\mathcal{M}}
+\DeclareMathOperator{\Conv}{Conv}
+\newcommand{\JLt}{J^{\mathrm{LMPC},j}_{t\to t+N}}
+\newcommand{\JL}{J^{\mathrm{LMPC},j}_{0\to N}}
+\newcommand{\Jstar}{J^{*}_{0\to\infty}}
+\newcommand{\eqp}[1]{\textup{[P-#1]}}   % equazione #1 del paper
+\newcommand{\libro}[1]{\textup{[BBM, #1]}} % rimando al libro di Borrelli, Bemporad, Morari
+\newcommand{\vett}[1]{\mathbf{#1}}
+
+\title{Learning Model Predictive Control per compiti iterativi\\[4pt]
+\large Guida alla lettura di U.~Rosolia e F.~Borrelli,\\
+\emph{Learning Model Predictive Control for Iterative Tasks:\\
+A Computationally Efficient Approach for Linear System},\\
+IFAC PapersOnLine 50-1 (2017), pp.~3142--3147}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ===========================================================================
+\section{Di che cosa parla il paper}\label{sec:intro}
+% ===========================================================================
+
+Molti sistemi di controllo eseguono \emph{lo stesso compito più volte}: un
+robot ripete lo stesso movimento di presa, un'auto da corsa percorre lo stesso
+circuito giro dopo giro, un reattore chimico ripete lo stesso lotto di
+produzione. Ogni esecuzione del compito si chiama \emph{iterazione} (o
+\emph{prova}). Se le iterazioni partono tutte dallo stesso stato iniziale e
+hanno lo stesso obiettivo, è naturale chiedersi se il controllore possa
+\emph{imparare} dalle esecuzioni passate e fare meglio a ogni nuova
+esecuzione.
+
+Il paper propone un controllore di questo tipo, chiamato \emph{Learning Model
+Predictive Control} (LMPC). È un MPC del tutto ordinario nella struttura (a
+ogni istante risolve un problema di ottimo su un orizzonte finito e applica il
+primo ingresso), con una differenza: \textbf{l'insieme terminale e il costo
+terminale non sono progettati a priori, ma costruiti con i dati delle
+iterazioni precedenti}. Più precisamente:
+\begin{itemize}
+  \item l'insieme terminale è l'\emph{inviluppo convesso} di tutti gli stati
+        visitati nelle iterazioni passate (il \emph{convex safe set});
+  \item il costo terminale è un'interpolazione convessa dei costi
+        \emph{effettivamente pagati} a partire da quegli stati (la
+        \emph{funzione baricentrica}).
+\end{itemize}
+Con queste due scelte il paper dimostra quattro proprietà:
+\begin{enumerate}
+  \item[(i)] \emph{stabilità asintotica}: a ogni iterazione il sistema in
+        anello chiuso converge all'equilibrio desiderato $x_F$;
+  \item[(ii)] \emph{fattibilità ricorsiva}: se il problema di ottimo è
+        risolvibile all'istante iniziale, lo resta per sempre, e i vincoli su
+        stato e ingresso non vengono mai violati;
+  \item[(iii)] \emph{miglioramento delle prestazioni}: il costo pagato in
+        un'iterazione non è mai maggiore di quello dell'iterazione precedente;
+  \item[(iv)] \emph{ottimalità globale}: se le traiettorie convergono a una
+        traiettoria limite al crescere del numero di iterazioni, quella
+        traiettoria è la soluzione ottima del problema a orizzonte
+        \emph{infinito}.
+\end{enumerate}
+Le proprietà (i) e (ii) sono i requisiti standard di ogni MPC ben progettato;
+(iii) e (iv) sono quelle tipiche dell'apprendimento.
+
+Il LMPC era già stato proposto dagli stessi autori per sistemi non lineari
+(Rosolia e Borrelli, 2016). In quella versione l'insieme terminale è un
+insieme \emph{discreto} di punti, e imporre che lo stato finale predetto cada
+su uno di quei punti richiede variabili intere: il problema da risolvere a ogni
+istante è un \emph{mixed-integer program}, molto costoso. Il contributo di
+questo paper è mostrare che, \textbf{quando il sistema è lineare}, si può
+sostituire l'insieme di punti con il suo inviluppo convesso senza perdere
+nessuna garanzia: il problema diventa convesso (un QP, se il costo è
+quadratico) e si risolve in tempi di diversi ordini di grandezza inferiori.
+
+\ideachiave{Un MPC è stabile e ricorsivamente fattibile se ha un insieme
+terminale \emph{controllo-invariante} e un costo terminale che si comporta da
+\emph{funzione di Lyapunov} su quell'insieme. Il LMPC non progetta questi due
+oggetti: li ricava dai dati. Il motivo per cui funziona è una proprietà dei
+sistemi lineari con vincoli e costi convessi: \emph{ogni combinazione convessa
+di traiettorie realizzate è ancora una traiettoria ammissibile, e il suo costo
+non supera la combinazione convessa dei costi}. Tutto il paper discende da
+questa osservazione.}
+
+\paragraph{Come è organizzato questo documento.}
+La sezione~\ref{sec:richiami} richiama le basi teoriche che servono: insiemi e
+funzioni convesse, problemi di ottimo convessi, controllo ottimo a orizzonte
+infinito, invarianza e stabilità secondo Lyapunov, le condizioni classiche di
+stabilità dell'MPC, il controllo iterativo. Le sezioni dalla~\ref{sec:problema}
+alla~\ref{sec:convergenza} seguono il paper nell'ordine in cui è scritto,
+spiegando ogni definizione e ricostruendo le dimostrazioni passo per passo. La
+sezione~\ref{sec:esempio} commenta l'esempio numerico del paper in modo
+qualitativo. La sezione~\ref{sec:libro} mette il paper in relazione con il
+libro di Borrelli, Bemporad e Morari, \emph{Predictive Control for Linear and
+Hybrid Systems} (Cambridge University Press, 2017), di cui Borrelli, secondo
+autore del paper, è il primo autore: mostra da quali risultati del libro
+discendono i ragionamenti del paper e che cosa il paper aggiunge. La
+sezione~\ref{sec:limiti} discute ipotesi e limiti, la
+sezione~\ref{sec:riepilogo} riassume.
+
+\paragraph{Convenzioni.}
+Le equazioni del paper sono citate come \eqp{n}: \eqp{18} è l'equazione (18)
+del paper. I rimandi al libro sono scritti come \libro{Teorema 12.2}, con la
+numerazione del libro. Le equazioni di questo documento hanno la numerazione
+normale. Il
+paper usa la lettera $k$ con due significati diversi (indice di iterazione
+nelle sommatorie e istante di predizione nel problema di MPC) e la lettera $t$
+sia per l'istante corrente sia come indice muto nelle sommatorie sui dati. Qui
+i significati sono separati come nella tabella~\ref{tab:notazione}.
+
+\begin{table}[h]
+\centering
+\caption{Notazione usata nel documento.}\label{tab:notazione}
+\begin{tabular}{ll}
+\toprule
+Simbolo & Significato \\
+\midrule
+$x\in\R^n$, $u\in\R^m$ & stato e ingresso del sistema \\
+$\Xc$, $\Uc$ & insiemi (convessi) dei valori ammessi per stato e ingresso \\
+$x_S$, $x_F$ & stato iniziale di ogni iterazione, equilibrio finale \\
+$h(x,u)$ & costo di stadio \\
+$j$ & iterazione corrente \\
+$i$ & iterazione generica (passata), $i\le j$ \\
+$t$ & istante corrente all'interno di un'iterazione \\
+$s$ & istante a cui è stato registrato un dato, $x^i_s$, $u^i_s$ \\
+$k$ & istante predetto: $x_{k|t}$ è la predizione di $x_k$ fatta all'istante $t$ \\
+$l$ & indice muto nelle somme dei costi \\
+$N$ & orizzonte di predizione \\
+$x^i_s$, $u^i_s$ & stato e ingresso \emph{realizzati} all'istante $s$ dell'iterazione $i$ \\
+$J^i_{s\to\infty}(x^i_s)$ & costo realizzato da $x^i_s$ in poi (\emph{cost-to-go}) \\
+$\Jstar(x)$ & costo ottimo a orizzonte infinito a partire da $x$ \\
+$\SSet^j$, $\CS^j$ & safe set campionato e safe set convesso dopo l'iterazione $j$ \\
+$\lambda^i_s$ & peso del dato $x^i_s$ in una combinazione convessa \\
+$P^j(x)$ & funzione baricentrica (costo terminale) \\
+$\JLt(x^j_t)$ & costo ottimo del problema LMPC all'istante $t$ dell'iterazione $j$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ===========================================================================
+\section{Richiami teorici}\label{sec:richiami}
+% ===========================================================================
+
+\subsection{Sistemi lineari vincolati}\label{sec:sistemi}
+
+Il paper considera sistemi lineari a tempo discreto e tempo invarianti
+\begin{equation}\label{eq:sistema}
+  x_{t+1} = A x_t + B u_t, \qquad x_t\in\R^n,\; u_t\in\R^m,
+\end{equation}
+soggetti ai vincoli
+\begin{equation}\label{eq:vincoli}
+  x_t\in\Xc,\qquad u_t\in\Uc\qquad \forall t\in\Zn,
+\end{equation}
+con $\Xc$ e $\Uc$ insiemi \emph{convessi}. Nella pratica sono quasi sempre
+poliedri, cioè insiemi descritti da disuguaglianze lineari, ad esempio limiti
+superiori e inferiori su ogni componente ($\underline{x}\le x\le\overline{x}$,
+$\underline{u}\le u\le\overline{u}$).
+
+Un punto $x_F$ è un \emph{equilibrio del sistema non forzato} se
+\begin{equation}\label{eq:equilibrio}
+  x_F = A x_F,
+\end{equation}
+cioè se, applicando $u=0$, lo stato resta in $x_F$. Il caso più comune è
+$x_F=0$. Il paper chiede che $x_F$ sia anche \emph{ammissibile}, cioè
+$x_F\in\Xc$ e $0\in\Uc$: il sistema può restare in $x_F$ per sempre senza
+violare i vincoli.
+
+\subsection{Insiemi convessi, inviluppo convesso, funzioni convesse}\label{sec:convessita}
+
+\begin{definizione}[Combinazione convessa]
+Dati i punti $z_1,\dots,z_M\in\R^n$, una loro \emph{combinazione convessa} è
+un punto
+\[
+  z = \sum_{r=1}^{M}\lambda_r z_r,\qquad \lambda_r\ge 0,\qquad
+  \sum_{r=1}^{M}\lambda_r = 1.
+\]
+I pesi $\lambda_r$ sono anche detti \emph{coordinate baricentriche} di $z$
+rispetto ai punti $z_r$.
+\end{definizione}
+
+Geometricamente, la combinazione convessa di due punti è un punto del segmento
+che li unisce; quella di tre punti è un punto del triangolo che ha i tre punti
+per vertici; e così via.
+
+\begin{definizione}[Insieme convesso, inviluppo convesso]
+Un insieme $C\subseteq\R^n$ è \emph{convesso} se contiene il segmento che
+unisce due qualsiasi dei suoi punti. L'\emph{inviluppo convesso}
+$\Conv(S)$ di un insieme $S$ è il più piccolo insieme convesso che contiene
+$S$; coincide con l'insieme di tutte le combinazioni convesse (finite) di
+punti di $S$. Se $S$ è un insieme finito di punti, $\Conv(S)$ è un
+\emph{politopo}: un poliedro limitato i cui vertici sono alcuni dei punti di
+$S$.
+\end{definizione}
+
+Un politopo si può descrivere in due modi equivalenti: con i suoi vertici
+(\emph{rappresentazione V}: ``tutte le combinazioni convesse di questi
+punti'') o con le disuguaglianze delle sue facce (\emph{rappresentazione H}:
+$\{x: Hx\le g\}$). Passare da una all'altra è costoso in dimensione alta: il
+libro \libro{Sez.~4.4.2} osserva che il calcolo dell'inviluppo convesso in
+forma H ha un costo esponenziale nel numero di facce. Il
+paper userà sempre la rappresentazione V, che il libro scrive in forma
+compatta \libro{eq.~(4.8)} come
+\[
+  \Conv(V) = \{V\lambda : \lambda\ge 0,\ \vett{1}^\top\lambda = 1\},
+\]
+con $V$ matrice che ha per colonne i punti: non calcola mai le facce
+dell'inviluppo convesso, ma tratta i pesi $\lambda$ come variabili di
+ottimizzazione.
+
+\begin{definizione}[Funzione convessa]
+Una funzione $f:C\to\R$, con $C$ convesso, è \emph{convessa} se
+\[
+  f(\theta z_1 + (1-\theta) z_2) \le \theta f(z_1) + (1-\theta) f(z_2)
+  \qquad \forall z_1,z_2\in C,\;\theta\in[0,1].
+\]
+Il costo di stadio $h(x,u)$ è \emph{congiuntamente convesso} se è convesso
+come funzione della coppia $(x,u)$, cioè del vettore $(x,u)\in\R^{n+m}$.
+\end{definizione}
+
+L'esempio tipico è il costo quadratico $h(x,u)=x^\top Q x + u^\top R u$ con
+$Q\succeq 0$ e $R\succeq 0$, congiuntamente convesso perché è una forma
+quadratica semidefinita positiva del vettore $(x,u)$.
+
+\begin{lemma}[Disuguaglianza di Jensen]\label{lem:jensen}
+Se $f$ è convessa, per ogni combinazione convessa vale
+\[
+  f\Big(\sum_{r=1}^M \lambda_r z_r\Big) \le \sum_{r=1}^M \lambda_r f(z_r).
+\]
+\end{lemma}
+\begin{proof}
+Per $M=2$ è la definizione di convessità. Se vale per $M-1$ punti e
+$\lambda_M<1$, si scrive
+$\sum_{r=1}^{M}\lambda_r z_r = (1-\lambda_M)\,w + \lambda_M z_M$ con
+$w=\sum_{r<M}\frac{\lambda_r}{1-\lambda_M}z_r$, che è una combinazione
+convessa di $M-1$ punti. Applicando la definizione e poi l'ipotesi induttiva
+a $w$ si ottiene la tesi. (Se $\lambda_M=1$ la tesi è banale.)
+\end{proof}
+
+In parole: \emph{la funzione valutata nella media pesata non supera la media
+pesata dei valori}. Nel paper la disuguaglianza di Jensen è il passaggio
+centrale della dimostrazione di stabilità (equazione~\eqp{31}).
+
+\subsection{Il lemma che regge tutto il paper}\label{sec:lemma-traiettorie}
+
+Il risultato seguente non compare nel paper come enunciato separato, ma è
+usato in tutte le dimostrazioni. Conviene isolarlo subito.
+
+\begin{lemma}[Combinazioni convesse di traiettorie]\label{lem:traiettorie}
+Siano $(x^{(r)}_s, u^{(r)}_s)_{s\ge 0}$, per $r=1,\dots,M$, traiettorie del
+sistema~\eqref{eq:sistema}: $x^{(r)}_{s+1} = A x^{(r)}_s + B u^{(r)}_s$, con
+$x^{(r)}_s\in\Xc$ e $u^{(r)}_s\in\Uc$ per ogni $s$. Siano $\lambda_r\ge 0$ con
+$\sum_r\lambda_r=1$. Allora le successioni
+\[
+  \tilde x_s = \sum_{r=1}^M\lambda_r x^{(r)}_s, \qquad
+  \tilde u_s = \sum_{r=1}^M\lambda_r u^{(r)}_s
+\]
+\begin{enumerate}
+  \item sono ancora una traiettoria del sistema: $\tilde x_{s+1}=A\tilde x_s+B\tilde u_s$;
+  \item rispettano i vincoli: $\tilde x_s\in\Xc$, $\tilde u_s\in\Uc$;
+  \item hanno un costo non maggiore della combinazione dei costi, se $h$ è
+        congiuntamente convesso:
+        $h(\tilde x_s,\tilde u_s)\le\sum_r\lambda_r h(x^{(r)}_s,u^{(r)}_s)$.
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+(1) Per linearità,
+$A\tilde x_s + B\tilde u_s = \sum_r\lambda_r(Ax^{(r)}_s+Bu^{(r)}_s)
+=\sum_r\lambda_r x^{(r)}_{s+1}=\tilde x_{s+1}$.
+(2) $\tilde x_s$ è combinazione convessa di punti di $\Xc$, che è convesso;
+lo stesso per $\tilde u_s$ e $\Uc$.
+(3) È la disuguaglianza di Jensen applicata a $h$ nei punti
+$(x^{(r)}_s,u^{(r)}_s)$.
+\end{proof}
+
+\begin{osservazione}
+Il punto (1) è il \emph{principio di sovrapposizione} dei sistemi lineari,
+ristretto a pesi che sommano a uno. Per un sistema non lineari
+$x_{s+1}=f(x_s,u_s)$ è falso: la media di due traiettorie in generale non è
+una traiettoria. È esattamente questo il motivo per cui il LMPC non lineare
+del 2016 non può usare l'inviluppo convesso e deve ricorrere a variabili
+intere.
+\end{osservazione}
+
+\subsection{Problemi di ottimo convessi: LP, QP, MIP}\label{sec:ottimizzazione}
+
+Un problema di ottimo $\min_z f(z)$ con $z\in Z$ è \emph{convesso} se $f$ è
+convessa e $Z$ è convesso. La proprietà fondamentale è che \emph{ogni minimo
+locale è anche globale}: non esistono ``valli'' secondarie in cui un
+algoritmo possa rimanere intrappolato. Due casi particolari interessano qui:
+\begin{itemize}
+  \item \emph{programmazione lineare} (LP): costo lineare $c^\top z$, vincoli
+        lineari $Gz\le g$, $Ez=e$;
+  \item \emph{programmazione quadratica} (QP): costo
+        $\tfrac12 z^\top H z + f^\top z$ con $H\succeq 0$, vincoli lineari.
+\end{itemize}
+Entrambi si risolvono in tempo polinomiale con algoritmi maturi (simplesso,
+punti interni, insiemi attivi: \texttt{quadprog} in MATLAB è uno di questi).
+Il libro li tratta in \libro{Cap.~2} e i metodi numerici in \libro{Cap.~3}.
+
+Se invece alcune variabili devono essere \emph{intere} (tipicamente binarie,
+$\delta\in\{0,1\}$), il problema è un \emph{mixed-integer program} (MIP,
+oppure MIQP se il costo è quadratico). L'insieme ammissibile non è più
+convesso: è un'unione di pezzi, uno per ogni combinazione delle variabili
+binarie. Gli algoritmi esatti (\emph{branch and bound}) esplorano in modo
+intelligente queste combinazioni, ma nel caso peggiore il loro numero cresce
+in modo esponenziale con il numero di variabili binarie: i problemi con
+variabili 0-1 sono in generale NP-completi \libro{Sez.~2.4 e~17.4.1}. Nel LMPC del 2016
+c'è una variabile binaria per ogni stato memorizzato, e gli stati memorizzati
+aumentano a ogni iterazione: da qui il costo computazionale che questo paper
+elimina.
+
+\subsection{Controllo ottimo a orizzonte infinito}\label{sec:ottimo-infinito}
+
+Il problema che il paper vuole risolvere è
+\begin{equation}\label{eq:ottimo-infinito}
+\begin{aligned}
+  \Jstar(x_S) = \min_{u_0,u_1,\dots}\ & \sum_{k=0}^{\infty} h(x_k,u_k)\\
+  \text{s.t. }\ & x_{k+1} = Ax_k + Bu_k,\quad x_0 = x_S,\\
+  & x_k\in\Xc,\ u_k\in\Uc\quad \forall k\ge 0.
+\end{aligned}
+\end{equation}
+La funzione $x\mapsto\Jstar(x)$, che associa a ogni stato iniziale il costo
+ottimo, si chiama \emph{funzione valore} (o \emph{costo ottimo da percorrere},
+\emph{optimal cost-to-go}). Essa soddisfa il \emph{principio di ottimalità di
+Bellman}:
+\begin{equation}\label{eq:bellman}
+  \Jstar(x) = \min_{u\in\Uc,\ Ax+Bu\in\mathcal{D}}
+  \Big\{ h(x,u) + \Jstar(Ax+Bu)\Big\},
+\end{equation}
+dove $\mathcal{D}$ è l'insieme degli stati da cui il problema è risolvibile.
+In parole: il costo ottimo da $x$ è il costo del primo passo più il costo
+ottimo dallo stato in cui si arriva. Se si conoscesse $\Jstar$, basterebbe
+risolvere a ogni istante il problema a un passo~\eqref{eq:bellman} per ottenere
+il controllo ottimo a orizzonte infinito \libro{Sez.~7.4, eq.~(7.21)--(7.22)}.
+
+Senza vincoli e con costo quadratico, $\Jstar(x)=x^\top P_\infty x$ con
+$P_\infty$ soluzione dell'equazione algebrica di Riccati (LQR). \emph{Con} i
+vincoli (\emph{constrained} LQR, CLQR) non esiste una formula chiusa: la
+funzione valore è quadratica a tratti su una partizione poliedrica dello
+spazio di stato, e calcolarla esattamente è possibile solo per problemi
+piccoli \libro{Sez.~11.3.4--11.3.5}. L'esempio del paper (sezione~\ref{sec:esempio})
+usa proprio questa soluzione esatta come termine di paragone.
+
+\subsection{Invarianza e stabilità secondo Lyapunov}\label{sec:lyapunov}
+
+\begin{definizione}[Insieme controllo-invariante, \libro{Def.~10.9}]\label{def:invariante}
+Un insieme $C\subseteq\Xc$ è \emph{controllo-invariante} per il
+sistema~\eqref{eq:sistema} con i vincoli~\eqref{eq:vincoli} se
+\[
+  \forall x\in C\quad \exists u\in\Uc:\quad Ax+Bu\in C.
+\]
+\end{definizione}
+Se lo stato è in un insieme controllo-invariante, esiste sempre un ingresso
+ammissibile che lo mantiene nell'insieme, e quindi lo si può mantenere
+nell'insieme (e nei vincoli) \emph{per sempre}. Per questo gli insiemi
+controllo-invarianti sono detti anche ``sicuri''.
+
+Si consideri ora un sistema in anello chiuso $x_{t+1}=f(x_t)$ con un
+equilibrio $x_F=f(x_F)$.
+
+\begin{definizione}[Stabilità asintotica]
+L'equilibrio $x_F$ è \emph{stabile} se per ogni $\varepsilon>0$ esiste
+$\delta>0$ tale che $\|x_0-x_F\|<\delta$ implica $\|x_t-x_F\|<\varepsilon$
+per ogni $t$; è \emph{asintoticamente stabile} se è stabile e inoltre
+$x_t\to x_F$ per $t\to\infty$ (per stati iniziali in un opportuno insieme,
+la \emph{regione di attrazione}).
+\end{definizione}
+
+\begin{teorema}[Lyapunov, tempo discreto, \libro{Teorema 7.2}]\label{teo:lyapunov}
+Sia $\Omega$ un insieme positivamente invariante per $x_{t+1}=f(x_t)$ con
+$x_F\in\Omega$. Se esiste una funzione $V:\Omega\to\R$ continua in $x_F$ con
+\[
+  V(x_F)=0,\qquad V(x)>0\ \ \forall x\ne x_F,\qquad
+  V(f(x)) - V(x) \le -\alpha(x) < 0\ \ \forall x\ne x_F,
+\]
+con $\alpha$ continua e definita positiva, allora $x_F$ è asintoticamente
+stabile con regione di attrazione $\Omega$.
+\end{teorema}
+
+L'idea è intuitiva: $V$ è una sorta di ``energia'' che è nulla solo
+all'equilibrio e diminuisce strettamente a ogni passo; non potendo diminuire
+per sempre di quantità non trascurabili, deve tendere a zero, e con essa la
+distanza da $x_F$. Nell'MPC il ruolo di $V$ è svolto dal costo ottimo del
+problema di predizione, e $\alpha(x)$ è il costo di stadio $h$.
+
+\subsection{Il controllo predittivo e le sue garanzie classiche}\label{sec:mpc}
+
+L'MPC rende trattabile il problema~\eqref{eq:ottimo-infinito} troncandolo a un
+orizzonte finito $N$. All'istante $t$, misurato lo stato $x_t$, risolve
+\begin{equation}\label{eq:mpc}
+\begin{aligned}
+  J^{\mathrm{MPC}}_N(x_t) = \min_{u_{t|t},\dots,u_{t+N-1|t}}\ &
+  \sum_{k=t}^{t+N-1} h(x_{k|t},u_{k|t}) + V_f(x_{t+N|t})\\
+  \text{s.t. }\ & x_{k+1|t} = Ax_{k|t} + Bu_{k|t},\quad x_{t|t}=x_t,\\
+  & x_{k|t}\in\Xc,\ u_{k|t}\in\Uc,\quad k=t,\dots,t+N-1,\\
+  & x_{t+N|t}\in\Xf,
+\end{aligned}
+\end{equation}
+applica il primo ingresso $u_t = u^*_{t|t}$ e all'istante successivo ripete
+tutto con il nuovo stato misurato (\emph{orizzonte recedente}, figura~\ref{fig:recedente}).
+Gli oggetti $\Xf$ (\emph{insieme terminale}) e $V_f$ (\emph{costo terminale})
+rappresentano ``ciò che succede dopo l'orizzonte''.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small]
+  \draw[->] (0,0) -- (10.6,0) node[below left]{tempo};
+  \draw[->] (0,0) -- (0,3.4) node[left]{stato};
+  \fill[green!15] (7.65,0) rectangle (8.35,0.9);
+  \node[green!40!black] at (8,1.15) {$\Xf$};
+  \draw[thick] plot[smooth] coordinates {(0.4,2.9) (1.4,2.7) (2.4,2.4) (3.4,2.1)};
+  \foreach \p in {(0.4,2.9),(1.4,2.7),(2.4,2.4),(3.4,2.1)} \fill \p circle (1.6pt);
+  \draw[dashed, blue, thick] (3.4,2.1) -- (4.55,1.7) -- (5.7,1.3) -- (6.85,0.95) -- (8,0.6);
+  \foreach \p in {(4.55,1.7),(5.7,1.3),(6.85,0.95),(8,0.6)} \fill[blue] \p circle (1.6pt);
+  \draw[dotted, red, thick] (4.55,1.7) -- (5.7,1.25) -- (6.85,0.85) -- (8,0.55) -- (9.15,0.35);
+  \draw[dotted] (3.4,0) -- (3.4,3.1);
+  \foreach \xx/\lab in {3.4/t, 4.55/t{+}1, 8/t{+}N}
+     \draw (\xx,0.06) -- (\xx,-0.06) node[below]{$\lab$};
+  \draw[decorate, decoration={brace, mirror, amplitude=5pt}] (3.4,-0.6) -- (8,-0.6)
+     node[midway, below=6pt]{orizzonte di predizione $N$};
+  \node[orange!80!black, font=\footnotesize, above] at (4.05,2.25) {applicato};
+  \begin{scope}[xshift=8.9cm, yshift=2.9cm, font=\footnotesize]
+    \draw[thick] (0,0) -- (0.5,0); \node[right] at (0.5,0) {stati misurati};
+    \draw[dashed, blue, thick] (0,-0.4) -- (0.5,-0.4); \node[right] at (0.5,-0.4) {predizione in $t$};
+    \draw[dotted, red, thick] (0,-0.8) -- (0.5,-0.8); \node[right] at (0.5,-0.8) {predizione in $t{+}1$};
+  \end{scope}
+\end{tikzpicture}
+\caption{Orizzonte recedente. All'istante $t$ si predice l'evoluzione per $N$
+passi, imponendo che lo stato finale cada nell'insieme terminale $\Xf$; si
+applica solo il primo ingresso. All'istante $t+1$ la finestra si sposta di un
+passo e il problema viene risolto di nuovo.}
+\label{fig:recedente}
+\end{figure}
+
+Troncare l'orizzonte ha un prezzo. Un MPC ``ingenuo'' (senza $\Xf$ e $V_f$
+adeguati) è \emph{miope}: può portare il sistema in uno stato da cui, qualche
+passo dopo, non esiste più alcun ingresso che rispetti i vincoli (perdita di
+fattibilità), oppure può non convergere all'equilibrio (perdita di
+stabilità). La teoria classica (Mayne et al., 2000) dà condizioni sufficienti
+per evitare entrambi i problemi.
+
+\begin{ipotesi}[Condizioni classiche sugli ingredienti terminali]\label{ip:terminali}
+\leavevmode
+\begin{enumerate}
+  \item $h(x_F,0)=0$ e $h(x,u)>0$ per ogni $(x,u)\ne(x_F,0)$;
+  \item $\Xf\subseteq\Xc$ è controllo-invariante e contiene $x_F$;
+  \item su $\Xf$ il costo terminale $V_f$ è una \emph{funzione di Lyapunov di
+        controllo} \libro{Remark 12.3}: per ogni $x\in\Xf$ esiste $u\in\Uc$
+        tale che
+        \begin{equation}\label{eq:clf}
+          Ax+Bu\in\Xf\qquad\text{e}\qquad V_f(Ax+Bu) - V_f(x)\le -h(x,u).
+        \end{equation}
+\end{enumerate}
+\end{ipotesi}
+
+\begin{teorema}[Stabilità dell'MPC, \libro{Teorema 12.2}]\label{teo:mpc}
+Sotto l'ipotesi~\ref{ip:terminali}, se il problema~\eqref{eq:mpc} ha
+soluzione in $t=0$, allora ha soluzione per ogni $t\ge 0$ e lungo l'anello
+chiuso
+\begin{equation}\label{eq:decrescita-mpc}
+  J^{\mathrm{MPC}}_N(x_{t+1}) - J^{\mathrm{MPC}}_N(x_t) \le -h(x_t,u_t).
+\end{equation}
+Di conseguenza (con le opportune ipotesi di continuità) $x_F$ è
+asintoticamente stabile, con regione di attrazione l'insieme degli stati da
+cui~\eqref{eq:mpc} ha soluzione.
+\end{teorema}
+\begin{proof}[Idea della dimostrazione]
+Sia $(u^*_{t|t},\dots,u^*_{t+N-1|t})$ la soluzione ottima all'istante $t$ e
+$x^*_{t+N|t}\in\Xf$ lo stato finale predetto. Per il punto 3
+dell'ipotesi esiste $\bar u$ che mantiene $x^*_{t+N|t}$ in $\Xf$. All'istante
+$t+1$ si considera la sequenza \emph{traslata}
+\[
+  (u^*_{t+1|t},\dots,u^*_{t+N-1|t},\ \bar u):
+\]
+le prime $N-1$ mosse sono quelle già pianificate, l'ultima è quella fornita
+dall'ipotesi. Poiché il modello è esatto, $x_{t+1}=x^*_{t+1|t}$ e la sequenza
+traslata produce gli stessi stati predetti, più un ultimo stato
+$\bar x = Ax^*_{t+N|t}+B\bar u\in\Xf$: è \emph{ammissibile} (questo dà la
+fattibilità ricorsiva). Il suo costo è quello ottimo all'istante $t$, meno il
+primo termine $h(x_t,u_t)$, meno il vecchio costo terminale, più il nuovo
+termine di stadio e il nuovo costo terminale:
+\[
+  J^{\mathrm{MPC}}_N(x_t) - h(x_t,u_t)
+  + \underbrace{h(x^*_{t+N|t},\bar u) + V_f(\bar x) - V_f(x^*_{t+N|t})}_{\le 0\ \text{per la~\eqref{eq:clf}}}.
+\]
+Il costo ottimo in $t+1$ non supera quello di una soluzione ammissibile, e
+si ottiene la~\eqref{eq:decrescita-mpc}. Il costo ottimo è quindi una
+funzione di Lyapunov e il teorema~\ref{teo:lyapunov} conclude.
+\end{proof}
+
+\ideachiave{Il teorema~\ref{teo:mpc} ha bisogno di una sola cosa ``difficile'':
+una coppia $(\Xf,V_f)$ che soddisfi la~\eqref{eq:clf}. Nella pratica la si
+costruisce attorno all'equilibrio con un controllore lineare locale (ad
+esempio LQR) e un insieme invariante piccolo, il che rende la regione di
+attrazione piccola e obbliga a orizzonti lunghi. Il LMPC usa la stessa
+dimostrazione, ma con una coppia $(\Xf,V_f)$ ricavata dai dati, grande e
+sempre più vicina alla coppia ideale (dominio di $\Jstar$, $\Jstar$).}
+
+\subsection{Compiti iterativi e Iterative Learning Control}\label{sec:ilc}
+
+L'\emph{Iterative Learning Control} (ILC) studia sistemi che ripetono lo stesso
+compito. Il tempo ha due scale: l'istante $t$ \emph{all'interno} di
+un'iterazione e l'indice $j$ \emph{dell'iterazione}. Le iterazioni partono
+dallo stesso stato iniziale, e alla fine di ognuna i dati registrati sono
+disponibili per progettare la successiva (figura~\ref{fig:scale}).
+
+Nella forma classica l'ILC insegue un riferimento $r_t$ noto e aggiorna
+l'ingresso con l'errore dell'iterazione precedente, con leggi del tipo
+\[
+  u^{j+1}_t = u^j_t + L\,(r_{t+1} - y^j_{t+1}),
+\]
+in modo che l'errore di inseguimento si annulli al crescere di $j$. Questo
+presuppone che \emph{il riferimento sia noto}. In molti compiti però il
+riferimento ``migliore'' è proprio ciò che non si sa: in una gara
+automobilistica non si conosce a priori la traiettoria che minimizza il tempo
+sul giro. Il LMPC è un controllo iterativo \emph{senza riferimento}
+(\emph{reference-free}): l'obiettivo non è inseguire una traiettoria, ma
+minimizzare un costo; ciò che si impara dalle iterazioni non è un segnale di
+correzione, ma una descrizione sempre migliore di \emph{dove} il sistema può
+stare in sicurezza e di \emph{quanto costa} arrivare alla fine da lì.
+
+Il paper cita anche un lavoro (Tamar et al., 2016) in cui il costo terminale
+di un MPC è appreso da una rete neurale: funziona in pratica, ma senza alcuna
+garanzia di stabilità, fattibilità o miglioramento. Il LMPC ottiene invece
+queste garanzie perché il costo terminale non è un'approssimazione generica,
+ma è costruito con costi \emph{realmente pagati} lungo traiettorie
+\emph{realmente percorse}.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small]
+  \foreach \j/\y in {0/0, 1/-1.4, 2/-2.8}{
+    \node[circle, fill, inner sep=1.6pt, label=left:{$x_S$}] (s\j) at (0,\y) {};
+    \node[circle, fill, inner sep=1.6pt, label=above:{$x_F$}] (f\j) at (7,\y) {};
+    \draw[->, thick] (s\j) .. controls (2.5,{\y+0.55}) and (4.5,{\y-0.45}) .. (f\j)
+      node[pos=0.5, above=4pt]{iterazione $\j$};
+  }
+  \node at (3.5,-3.6) {$\vdots$};
+  \draw[->] (0,1.0) -- (7,1.0) node[right]{tempo $t$ (dentro l'iterazione)};
+  \draw[->] (-1.2,0.3) -- (-1.2,-3.5) node[below]{iterazione $j$};
+  \node[draw, rounded corners, align=center, fill=gray!8] (mem) at (10.2,-1.4)
+     {memoria dei dati:\\ stati, ingressi,\\ costi realizzati};
+  \foreach \j in {0,1,2} \draw[->, dashed, gray] (f\j) -- (mem.west);
+\end{tikzpicture}
+\caption{Le due scale temporali di un compito iterativo. Ogni iterazione parte
+da $x_S$ e deve arrivare a $x_F$; a fine iterazione la traiettoria percorsa e
+i costi pagati vengono memorizzati e usati per progettare le iterazioni
+successive.}
+\label{fig:scale}
+\end{figure}
+
+% ===========================================================================
+\section{Il problema affrontato dal paper}\label{sec:problema}
+% ===========================================================================
+
+\paragraph{Dati di un'iterazione.}
+All'iterazione $j$ il sistema~\eqref{eq:sistema} viene fatto evolvere e si
+registrano le successioni di ingressi e stati (\eqp{3})
+\[
+  \vett{u}^j = [u^j_0,\,u^j_1,\,\dots,\,u^j_t,\,\dots],\qquad
+  \vett{x}^j = [x^j_0,\,x^j_1,\,\dots,\,x^j_t,\,\dots].
+\]
+Il pedice è il tempo, l'apice è l'iterazione: $x^j_t$ è lo stato
+\emph{realizzato} (misurato, non predetto) all'istante $t$ dell'iterazione
+$j$. Tutte le iterazioni partono dallo stesso stato (\eqp{4}):
+\begin{equation}\label{eq:stato-iniziale}
+  x^j_0 = x_S\qquad\forall j\ge 0.
+\end{equation}
+
+\paragraph{Obiettivo.}
+A ogni iterazione si vorrebbe risolvere il problema a orizzonte
+infinito~\eqref{eq:ottimo-infinito} (\eqp{5}) a partire da $x_S$. Sul costo di
+stadio il paper fa tre ipotesi (\eqp{6}):
+\begin{itemize}
+  \item $h$ è continuo;
+  \item $h$ è congiuntamente convesso in $(x,u)$;
+  \item $h$ è definito positivo rispetto a $(x_F,0)$: $h(x_F,0)=0$ e
+        $h(x,u)>0$ per ogni $(x,u)\ne(x_F,0)$.\footnote{Il paper scrive
+        ``$h(x^j_t,u^j_t)\succ 0$ per ogni $x^j_t\in\R^n\setminus\{x_F\}$,
+        $u^j_t\in\R^m\setminus\{0\}$''; il senso inteso, quello usato nelle
+        dimostrazioni, è la positività per ogni coppia diversa da
+        $(x_F,0)$.}
+\end{itemize}
+Lo stato finale $x_F$ è un equilibrio ammissibile del sistema non forzato,
+$x_F=Ax_F$ (\eqp{7}). La positività di $h$ ha una conseguenza importante: un
+costo totale finito $\sum_t h(x_t,u_t)<\infty$ è possibile solo se
+$h(x_t,u_t)\to 0$, cioè se la traiettoria converge a $x_F$. In altre parole,
+\emph{minimizzare il costo a orizzonte infinito significa anche portare il
+sistema a $x_F$}: il compito ``arrivare a $x_F$'' è codificato nel costo.
+
+\paragraph{Che cosa si misura a ogni iterazione.}
+Il problema~\eqref{eq:ottimo-infinito} non si sa risolvere direttamente (è a
+orizzonte infinito e vincolato). Il LMPC lo affronta per approssimazioni
+successive: a ogni iterazione applica un controllore, registra la traiettoria
+e il costo effettivamente pagato, e usa questa informazione per l'iterazione
+successiva. La qualità di un'iterazione si giudica dal costo realizzato
+$J^j_{0\to\infty}(x_S)=\sum_{t\ge 0}h(x^j_t,u^j_t)$, definito nella
+sezione~\ref{sec:costo-terminale}. Il traguardo è che questo costo scenda
+iterazione dopo iterazione fino al valore ottimo $\Jstar(x_S)$.
+
+\begin{figure}[h]
+\centering
+\newcommand{\disegnaDati}{%
+  \draw[gray] (-0.5,0.3) rectangle (5.7,4.1);
+  \node[gray, below left] at (5.7,4.1) {$\Xc$};
+  \draw[thick, black!70] (0,2.5) -- (1,3.3) -- (2,3.6) -- (3,3.3) -- (3.8,2.6)
+      -- (4.4,2) -- (4.8,1.7) -- (5,1.5);
+  \draw[thick, teal] (0,2.5) -- (1.2,2.2) -- (2.3,1.6) -- (3.3,1.1) -- (4.2,1.1)
+      -- (4.7,1.3) -- (5,1.5);
+  \foreach \p in {(1,3.3),(2,3.6),(3,3.3),(3.8,2.6),(4.4,2),(4.8,1.7)}
+      \fill[black!70] \p circle (1.7pt);
+  \foreach \p in {(1.2,2.2),(2.3,1.6),(3.3,1.1),(4.2,1.1),(4.7,1.3)}
+      \fill[teal] \p circle (1.7pt);
+  \fill (0,2.5) circle (2pt) node[left]{$x_S$};
+  \fill (5,1.5) circle (2pt) node[right]{$x_F$};
+}
+\begin{tikzpicture}[>=Stealth, font=\small, scale=0.95]
+  \begin{scope}
+    \disegnaDati
+    \node[black!70, font=\footnotesize] at (1.6,3.85) {iterazione 0};
+    \node[teal, font=\footnotesize] at (1.4,1.3) {iterazione 1};
+    \node at (2.6,-0.2) {$\SSet^1$: i punti};
+  \end{scope}
+  \begin{scope}[xshift=7.2cm]
+    \fill[blue!12] (0,2.5) -- (1,3.3) -- (2,3.6) -- (3,3.3) -- (3.8,2.6)
+      -- (4.8,1.7) -- (5,1.5) -- (4.7,1.3) -- (4.2,1.1) -- (3.3,1.1) -- cycle;
+    \draw[blue!60, thin] (0,2.5) -- (1,3.3) -- (2,3.6) -- (3,3.3) -- (3.8,2.6)
+      -- (4.8,1.7) -- (5,1.5) -- (4.7,1.3) -- (4.2,1.1) -- (3.3,1.1) -- cycle;
+    \disegnaDati
+    \node at (2.6,-0.2) {$\CS^1=\Conv(\SSet^1)$};
+  \end{scope}
+\end{tikzpicture}
+\caption{Spazio di stato (schematico, $n=2$). A sinistra: gli stati visitati
+in due iterazioni riuscite formano il safe set campionato $\SSet^1$, un
+insieme finito di punti. A destra: il safe set convesso $\CS^1$ è il loro
+inviluppo convesso. Il rettangolo rappresenta i vincoli di stato $\Xc$.}
+\label{fig:safe-set}
+\end{figure}
+
+% ===========================================================================
+\section{L'insieme terminale imparato: il safe set}\label{sec:safe-set}
+% ===========================================================================
+
+\subsection{Il safe set campionato}
+
+Si chiama \emph{iterazione riuscita} un'iterazione la cui traiettoria
+converge a $x_F$. L'insieme degli indici delle iterazioni riuscite fino alla
+$j$-esima è (\eqp{9})
+\begin{equation}\label{eq:Mj}
+  \Mc^j = \Big\{ i\in\{0,\dots,j\} : \lim_{s\to\infty} x^i_s = x_F \Big\}.
+\end{equation}
+Il \emph{safe set campionato} è l'insieme di tutti gli stati visitati durante
+le iterazioni riuscite (\eqp{8}):
+\begin{equation}\label{eq:SS}
+  \SSet^j = \bigcup_{i\in\Mc^j}\ \bigcup_{s=0}^{\infty}\{x^i_s\}.
+\end{equation}
+
+\begin{proposizione}\label{prop:SS}
+Ogni punto di $\SSet^j$ è ``sicuro'': da $x^i_s\in\SSet^j$ esiste una
+sequenza di ingressi ammissibili che porta lo stato a $x_F$ rispettando i
+vincoli e restando in $\SSet^j$. Inoltre $\SSet^j$ è controllo-invariante.
+\end{proposizione}
+\begin{proof}
+La sequenza è quella registrata, $u^i_s,u^i_{s+1},\dots$: è già stata
+applicata con successo, rispetta i vincoli, porta in $x^i_{s+1},x^i_{s+2},\dots$,
+che appartengono tutti a $\SSet^j$, e converge a $x_F$ perché $i\in\Mc^j$.
+\end{proof}
+
+Si noti che per sapere che questi punti sono sicuri non serve calcolare
+nulla: lo sono \emph{perché sono già stati percorsi}. È un insieme
+controllo-invariante ottenuto gratuitamente dai dati, senza le difficili
+procedure di calcolo degli insiemi invarianti.
+
+Il difetto di $\SSet^j$ è che è un \emph{insieme discreto}. Usarlo come
+insieme terminale significa imporre $x_{t+N|t}\in\SSet^j$, cioè che lo stato
+finale predetto coincida con uno dei punti memorizzati. Nel LMPC non lineare
+del 2016 questo vincolo si scrive con una variabile binaria $\delta^i_s$ per
+ogni punto:
+\[
+  x_{t+N|t}=\sum_{i,s}\delta^i_s\,x^i_s,\qquad \delta^i_s\in\{0,1\},\qquad
+  \sum_{i,s}\delta^i_s = 1,
+\]
+e il problema diventa un MIP con tante variabili binarie quanti sono i punti
+memorizzati.
+
+\subsection{Il safe set convesso}
+
+L'idea del paper è \emph{rilassare} le variabili binarie in variabili
+continue $\lambda^i_s\in[0,1]$. Lo stato finale non deve più coincidere con un
+punto memorizzato, ma può essere una qualunque loro combinazione convessa. Si
+definisce così il \emph{safe set convesso} (\eqp{10}):
+\begin{equation}\label{eq:CS}
+  \CS^j = \Conv(\SSet^j)
+  = \Big\{ \sum_{i\in\Mc^j}\sum_{s\ge 0}\lambda^i_s x^i_s\ :\
+    \lambda^i_s\ge 0,\ \sum_{i\in\Mc^j}\sum_{s\ge 0}\lambda^i_s = 1 \Big\}.
+\end{equation}
+(Il paper scrive la stessa cosa numerando i punti di $\SSet^j$ come
+$z_1,z_2,\dots$ con pesi $\alpha_1,\alpha_2,\dots$.) Per un sistema non lineare
+questo rilassamento sarebbe pericoloso: un punto ``in mezzo'' a punti sicuri
+non è necessariamente sicuro. Per un sistema lineare invece lo è.
+
+\begin{proposizione}[$\CS^j$ è controllo-invariante]\label{prop:CS-invariante}
+Se $\Xc$ e $\Uc$ sono convessi, $\CS^j\subseteq\Xc$ ed è
+controllo-invariante. Più precisamente, se
+$x=\sum_{i,s}\lambda^i_s x^i_s\in\CS^j$, l'ingresso
+\begin{equation}\label{eq:ubar}
+  \bar u = \sum_{i,s}\lambda^i_s u^i_s
+\end{equation}
+è ammissibile e porta in
+\begin{equation}\label{eq:xbar}
+  Ax + B\bar u = \sum_{i,s}\lambda^i_s x^i_{s+1}\in\CS^j.
+\end{equation}
+\end{proposizione}
+\begin{proof}
+$\CS^j\subseteq\Xc$ perché $\Xc$ è convesso e contiene tutti i punti di
+$\SSet^j$. Il resto è il lemma~\ref{lem:traiettorie} applicato alle traiettorie
+memorizzate: $\bar u\in\Uc$ perché combinazione convessa di ingressi
+ammissibili; per linearità
+$Ax+B\bar u=\sum\lambda^i_s(Ax^i_s+Bu^i_s)=\sum\lambda^i_s x^i_{s+1}$; questo è
+una combinazione convessa con gli \emph{stessi pesi} dei punti successori
+$x^i_{s+1}$, che appartengono anch'essi a $\SSet^j$; quindi sta in $\CS^j$.
+\end{proof}
+
+La dimostrazione dice qualcosa di più dell'invarianza: \emph{insegna come
+restare nell'insieme}. Se uno stato è una media pesata di stati memorizzati, si
+applica la stessa media pesata degli ingressi memorizzati, e lo stato
+successivo sarà la stessa media pesata degli stati successivi. Ripetendo
+all'infinito, lo stato segue la ``traiettoria media'', che converge a $x_F$
+perché tutte le traiettorie componenti vi convergono.
+
+\begin{osservazione}[Monotonia]
+Un'iterazione riuscita resta riuscita: $\Mc^i\subseteq\Mc^j$ per $i\le j$.
+Quindi $\SSet^i\subseteq\SSet^j$ e (\eqp{11})
+\begin{equation}\label{eq:CS-monotono}
+  \CS^i\subseteq\CS^j\qquad\forall i\le j.
+\end{equation}
+L'insieme terminale può solo crescere con le iterazioni. Ogni nuova
+traiettoria che esce dall'inviluppo attuale lo allarga.
+\end{osservazione}
+
+\begin{osservazione}[L'equilibrio finale]
+$x_F$ è il limite delle traiettorie memorizzate. Nella pratica le
+traiettorie sono finite e si memorizza come ultimo punto $x_F$ stesso (con
+ingresso $u=0$ e successore ancora $x_F$), così che $x_F\in\SSet^j$. Si
+assume questo nel seguito.
+\end{osservazione}
+
+% ===========================================================================
+\section{Il costo terminale imparato: la funzione baricentrica}\label{sec:costo-terminale}
+% ===========================================================================
+
+\subsection{Costi realizzati}
+
+Il secondo ingrediente è il costo terminale. Per ogni stato memorizzato
+$x^i_s$ si conosce il costo che è stato \emph{effettivamente pagato} da lì in
+poi lungo l'iterazione $i$ (\eqp{12}):
+\begin{equation}\label{eq:cost-to-go}
+  J^i_{s\to\infty}(x^i_s) = \sum_{l=0}^{\infty} h(x^i_{s+l},u^i_{s+l}).
+\end{equation}
+È un numero, non una funzione da ottimizzare. Si calcola a ritroso a fine
+iterazione con la ricorsione
+\begin{equation}\label{eq:ricorsione-costi}
+  J^i_{s\to\infty}(x^i_s) = h(x^i_s,u^i_s) + J^i_{s+1\to\infty}(x^i_{s+1}),
+\end{equation}
+partendo dal fondo della traiettoria, dove lo stato è $x_F$ e il costo
+residuo è nullo. Il costo dell'iterazione $i$ è il cost-to-go dal suo primo
+stato (\eqp{13}): $J^i_{0\to\infty}(x^i_0)=J^i_{0\to\infty}(x_S)$.
+
+Poiché ogni traiettoria memorizzata è ammissibile, il suo costo non può
+essere inferiore all'ottimo:
+\begin{equation}\label{eq:costo-maggiore-ottimo}
+  J^i_{s\to\infty}(x^i_s)\ \ge\ \Jstar(x^i_s).
+\end{equation}
+Il cost-to-go realizzato è quindi una \emph{stima per eccesso} del costo
+ottimo, disponibile però solo nei punti memorizzati.
+
+\subsection{La funzione baricentrica}
+
+Per avere un costo terminale definito su tutto $\CS^j$ e non solo nei punti
+memorizzati, il paper interpola i costi realizzati. La \emph{funzione
+baricentrica} (Jones e Morari, 2010) è (\eqp{14}--\eqp{15})
+\begin{equation}\label{eq:P}
+  P^j(x) =
+  \begin{cases}
+    p^{j,*}(x) & \text{se } x\in\CS^j,\\
+    +\infty    & \text{se } x\notin\CS^j,
+  \end{cases}
+\end{equation}
+dove $p^{j,*}(x)$ è il valore ottimo del programma lineare
+\begin{equation}\label{eq:LP}
+\begin{aligned}
+  p^{j,*}(x) = \min_{\lambda^i_s\ge 0}\ & \sum_{i\in\Mc^j}\sum_{s\ge 0}
+      \lambda^i_s\, J^i_{s\to\infty}(x^i_s)\\
+  \text{s.t. }\ & \sum_{i\in\Mc^j}\sum_{s\ge 0}\lambda^i_s = 1,\qquad
+      \sum_{i\in\Mc^j}\sum_{s\ge 0}\lambda^i_s x^i_s = x.
+\end{aligned}
+\end{equation}
+In parole: \emph{tra tutti i modi di scrivere $x$ come media pesata di stati
+memorizzati, si sceglie quello per cui la stessa media pesata dei costi
+realizzati è minima}. Il valore $+\infty$ fuori da $\CS^j$ è un modo compatto
+di dire che lo stato finale predetto \emph{deve} cadere in $\CS^j$: in
+qualunque problema di minimo, un costo infinito equivale a un vincolo.
+
+\begin{osservazione}[Interpretazione geometrica]
+Si considerino i punti $(x^i_s,\,J^i_{s\to\infty})\in\R^{n+1}$: ogni stato
+memorizzato ``sollevato'' all'altezza del suo costo. Il grafico di $P^j$ è il
+\emph{bordo inferiore dell'inviluppo convesso} di questa nuvola di punti
+(figura~\ref{fig:baricentrica}). È una funzione affine a tratti: sopra ogni
+``faccia'' inferiore dell'inviluppo, $P^j$ interpola linearmente i costi dei
+vertici della faccia. I punti che stanno sopra questo bordo (stati
+memorizzati con un costo realizzato ``cattivo'') non influenzano $P^j$.
+\end{osservazione}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small, x=2.6cm, y=1cm]
+  \draw[->] (-0.15,0) -- (3.6,0) node[below]{$x$};
+  \draw[->] (0,-0.2) -- (0,4.3) node[left]{costo};
+  \draw[dashed, thick, red!70!black, domain=0:3.3, samples=60]
+     plot (\x, {0.35*\x*\x}) node[right]{$\Jstar(x)$};
+  \draw[thick, blue!70!black] (0,0) -- (0.8,0.5) -- (2.2,1.9) -- (3,3.4);
+  \draw[->, thick, blue!70!black] (3,3.4) -- (3,4.2) node[right, font=\footnotesize]{$+\infty$ fuori da $\CS^j$};
+  \node[blue!70!black, above left] at (0.55,0.33) {$P^j(x)$};
+  \foreach \p in {(0,0),(0.8,0.5),(1.1,1.4),(1.5,1.3),(2.0,2.6),(2.2,1.9),(2.6,2.9),(3,3.4)}
+     \fill \p circle (2pt);
+  \node[below left] at (0,0) {$x_F$};
+  \draw[decorate, decoration={brace, mirror, amplitude=5pt}] (0,-0.45) -- (3,-0.45)
+     node[midway, below=6pt]{$\CS^j$};
+\end{tikzpicture}
+\caption{Funzione baricentrica in una dimensione (schematico). I punti neri
+sono le coppie $(x^i_s, J^i_{s\to\infty})$: stato memorizzato e costo
+realizzato da lì in poi. $P^j$ (linea continua) è il bordo inferiore del loro
+inviluppo convesso, definito su $\CS^j$. La funzione valore ottima $\Jstar$
+(tratteggiata) sta sempre sotto: $P^j$ è una stima per eccesso del costo
+ottimo.}
+\label{fig:baricentrica}
+\end{figure}
+
+Il paper osserva (\eqp{16}) che, indicando con $\lambda^{*,i}_s$ i pesi ottimi
+del problema~\eqref{eq:LP}, si può scrivere
+\begin{equation}\label{eq:P-esplicita}
+  P^j(x) = \sum_{i,s}\lambda^{*,i}_s J^i_{s\to\infty}(x^i_s)
+  = \sum_{i,s}\lambda^{*,i}_s\sum_{l=0}^{\infty} h(x^i_{s+l},u^i_{s+l}),
+\end{equation}
+cioè $P^j(x)$ è la media pesata, con i pesi ottimi, dei costi pagati lungo le
+traiettorie che ``passano attorno'' a $x$.
+
+\subsection{Proprietà della funzione baricentrica}
+
+\begin{proposizione}\label{prop:P}
+La funzione $P^j$ ha le proprietà seguenti.
+\begin{enumerate}
+  \item[(a)] \emph{È convessa} su $\CS^j$.
+  \item[(b)] \emph{Sovrastima il costo ottimo}: $P^j(x)\ge\Jstar(x)$ per ogni
+        $x\in\CS^j$.
+  \item[(c)] \emph{Non supera il costo realizzato} nei punti memorizzati:
+        $P^j(x^i_s)\le J^i_{s\to\infty}(x^i_s)$.
+  \item[(d)] \emph{Non cresce con le iterazioni}: $P^{j}(x)\le P^{j-1}(x)$
+        per ogni $x$.
+  \item[(e)] $P^j(x_F)=0$ e $P^j(x)\ge 0$.
+\end{enumerate}
+\end{proposizione}
+\begin{proof}
+(a) Siano $x_1,x_2\in\CS^j$ con pesi ottimi $\lambda_1$, $\lambda_2$ e sia
+$\theta\in[0,1]$. I pesi $\theta\lambda_1+(1-\theta)\lambda_2$ sono non
+negativi, sommano a uno e ricostruiscono $\theta x_1+(1-\theta)x_2$: sono
+ammissibili per~\eqref{eq:LP} in quel punto, con costo
+$\theta P^j(x_1)+(1-\theta)P^j(x_2)$. Il minimo non può essere maggiore, quindi
+$P^j(\theta x_1+(1-\theta)x_2)\le\theta P^j(x_1)+(1-\theta)P^j(x_2)$. (È un
+fatto generale: il valore ottimo di un LP in funzione del termine noto dei
+vincoli di uguaglianza è convesso.)
+
+(b) Con i pesi ottimi $\lambda^*$ per $x$, si combinano le traiettorie
+memorizzate che partono dai punti $x^i_s$, ciascuna ``riavviata''
+all'istante $s$. Per il lemma~\ref{lem:traiettorie} la combinazione è una
+traiettoria ammissibile che parte da $x$, con costo non maggiore di
+$\sum\lambda^{*,i}_s J^i_{s\to\infty}=P^j(x)$. Il costo ottimo $\Jstar(x)$ non
+supera il costo di nessuna traiettoria ammissibile.
+
+(c) Nel punto $x^i_s$ basta scegliere $\lambda^i_s=1$ e tutti gli altri pesi
+nulli: è ammissibile e ha costo $J^i_{s\to\infty}(x^i_s)$.
+
+(d) Passando da $j-1$ a $j$ si aggiungono punti e quindi variabili $\lambda$
+al problema~\eqref{eq:LP}; i vecchi pesi restano ammissibili (con i nuovi
+pesi a zero) e il minimo può solo diminuire. Fuori da $\CS^{j-1}$ il valore
+passa da $+\infty$ a un valore finito o resta $+\infty$.
+
+(e) Tutti i costi realizzati sono non negativi, quindi $P^j\ge 0$; in $x_F$
+si sceglie il peso unitario sul punto memorizzato $x_F$, che ha costo
+residuo nullo.
+\end{proof}
+
+La proprietà più importante è però la seguente: $P^j$ soddisfa su $\CS^j$
+esattamente la condizione~\eqref{eq:clf} richiesta al costo terminale di un
+MPC. Il paper la dimostra dentro la prova del teorema~1 (\eqp{30}--\eqp{31});
+qui la si isola come lemma.
+
+\begin{lemma}[$P^j$ è una funzione di Lyapunov di controllo su $\CS^j$]\label{lem:decrescita}
+Sia $x\in\CS^j$ e siano $\lambda^{*,i}_s$ i pesi ottimi di~\eqref{eq:LP} in
+$x$. Con l'ingresso $\bar u=\sum_{i,s}\lambda^{*,i}_s u^i_s\in\Uc$ e lo stato
+successivo $\bar x=Ax+B\bar u\in\CS^j$ vale
+\begin{equation}\label{eq:decrescita-P}
+  P^j(\bar x) \le P^j(x) - h(x,\bar u).
+\end{equation}
+\end{lemma}
+\begin{proof}
+Che $\bar u\in\Uc$ e $\bar x=\sum\lambda^{*,i}_s x^i_{s+1}\in\CS^j$ è la
+proposizione~\ref{prop:CS-invariante}. Per la disuguaglianza, si parte dalla
+definizione e si usa la ricorsione~\eqref{eq:ricorsione-costi}:
+\[
+\begin{aligned}
+  P^j(x) &= \sum_{i,s}\lambda^{*,i}_s J^i_{s\to\infty}(x^i_s)
+  = \sum_{i,s}\lambda^{*,i}_s h(x^i_s,u^i_s)
+   + \sum_{i,s}\lambda^{*,i}_s J^i_{s+1\to\infty}(x^i_{s+1})\\
+  &\ge h\Big(\sum_{i,s}\lambda^{*,i}_s x^i_s,\ \sum_{i,s}\lambda^{*,i}_s u^i_s\Big)
+   + \sum_{i,s}\lambda^{*,i}_s J^i_{s+1\to\infty}(x^i_{s+1})
+   && \text{(Jensen)}\\
+  &= h(x,\bar u) + \sum_{i,s}\lambda^{*,i}_s J^i_{s+1\to\infty}(x^i_{s+1})\\
+  &\ge h(x,\bar u) + P^j(\bar x).
+\end{aligned}
+\]
+L'ultimo passaggio vale perché i pesi $\lambda^{*,i}_s$, ``spostati'' sui
+punti successori $x^i_{s+1}$, sono ammissibili per il problema~\eqref{eq:LP}
+nel punto $\bar x$: sono non negativi, sommano a uno e ricostruiscono
+$\bar x$. Il loro costo è quindi maggiore o uguale al minimo $P^j(\bar x)$.
+\end{proof}
+
+\ideachiave{Il lemma~\ref{lem:decrescita} è il cuore tecnico del paper.
+Combinando le traiettorie memorizzate con i pesi che definiscono $P^j(x)$, si
+ottiene un ingresso che resta in $\CS^j$ e fa diminuire $P^j$ almeno del costo
+di stadio. Quindi la coppia $(\CS^j, P^j)$ soddisfa l'ipotesi~\ref{ip:terminali}
+del teorema classico dell'MPC, \emph{senza averla progettata}: è stata
+raccolta dai dati.}
+
+\subsection{Iterazioni di durata finita}
+
+Nella pratica ogni iterazione dura un tempo finito $t_i$ (\emph{Remark~3} del
+paper): le somme infinite su $s$ in~\eqref{eq:CS} e~\eqref{eq:LP} diventano
+somme fino a $t_i$ (\eqp{17}), e il problema~\eqref{eq:LP} diventa un LP con un
+numero finito di variabili, una per ogni stato memorizzato. Se l'ultimo
+stato registrato è (numericamente) $x_F$, le proprietà precedenti continuano
+a valere; il criterio usato nell'esempio per decidere quando un'iterazione è
+finita è discusso nella sezione~\ref{sec:esempio}.
+
+% ===========================================================================
+\section{Il controllore LMPC}\label{sec:lmpc}
+% ===========================================================================
+
+\subsection{Il problema risolto a ogni istante}
+
+All'istante $t$ dell'iterazione $j$, misurato lo stato $x^j_t$, il LMPC
+risolve (\eqp{18})
+\begin{equation}\label{eq:lmpc}
+\begin{aligned}
+  \JLt(x^j_t) = \min_{u_{t|t},\dots,u_{t+N-1|t}}\ &
+  \sum_{k=t}^{t+N-1} h(x_{k|t},u_{k|t}) + P^{j-1}(x_{t+N|t})\\
+  \text{s.t. }\ & x_{k+1|t} = Ax_{k|t}+Bu_{k|t},\quad k=t,\dots,t+N-1,\\
+  & x_{t|t} = x^j_t,\\
+  & x_{k|t}\in\Xc,\ u_{k|t}\in\Uc,\quad k=t,\dots,t+N-1,\\
+  & x_{t+N|t}\in\CS^{j-1}.
+\end{aligned}
+\end{equation}
+È esattamente il problema MPC~\eqref{eq:mpc} con
+\[
+  \Xf=\CS^{j-1},\qquad V_f = P^{j-1}:
+\]
+insieme e costo terminale sono quelli costruiti con le iterazioni
+$0,\dots,j-1$, cioè con tutti i dati disponibili all'inizio dell'iterazione
+$j$. Indicate con
+\[
+  \vett{u}^{*,j}_{t:t+N|t}=[u^{*,j}_{t|t},\dots,u^{*,j}_{t+N-1|t}],\qquad
+  \vett{x}^{*,j}_{t:t+N|t}=[x^{*,j}_{t|t},\dots,x^{*,j}_{t+N|t}]
+\]
+la sequenza ottima di ingressi e la traiettoria predetta corrispondente
+(\eqp{19}), al sistema si applica il primo ingresso (\eqp{20}):
+\begin{equation}\label{eq:legge}
+  u^j_t = u^{*,j}_{t|t}.
+\end{equation}
+All'istante $t+1$ si misura $x^j_{t+1}$ e si risolve di nuovo~\eqref{eq:lmpc}:
+è un normale orizzonte recedente. Insieme e costo terminale restano
+\emph{fissi per tutta l'iterazione} $j$; vengono aggiornati solo alla fine
+dell'iterazione, quando la nuova traiettoria è completa e i suoi costi
+realizzati si possono calcolare con la~\eqref{eq:ricorsione-costi}.
+
+Un aspetto da sottolineare: il vincolo terminale riguarda solo
+$x_{t+N|t}$. Gli stati intermedi della predizione possono uscire da
+$\CS^{j-1}$ (purché restino in $\Xc$). È così che il LMPC \emph{esplora}: può
+percorrere regioni dello spazio di stato mai visitate, a patto di rientrare,
+entro $N$ passi, in una zona di cui si sa che è sicura e quanto costa
+(figura~\ref{fig:predizione}). La traiettoria nuova verrà memorizzata e
+allargherà l'insieme terminale per le iterazioni successive.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small, scale=1.05]
+  \draw[gray] (-0.5,-0.15) rectangle (5.7,4.1);
+  \node[gray, below left] at (5.7,4.1) {$\Xc$};
+  \fill[blue!12] (0,2.5) -- (1,3.3) -- (2,3.6) -- (3,3.3) -- (3.8,2.6)
+      -- (4.8,1.7) -- (5,1.5) -- (4.7,1.3) -- (4.2,1.1) -- (3.3,1.1) -- cycle;
+  \draw[blue!60, thin] (0,2.5) -- (1,3.3) -- (2,3.6) -- (3,3.3) -- (3.8,2.6)
+      -- (4.8,1.7) -- (5,1.5) -- (4.7,1.3) -- (4.2,1.1) -- (3.3,1.1) -- cycle;
+  \node[blue!60!black] at (2.4,2.85) {$\CS^{j-1}$};
+  \foreach \p in {(1,3.3),(2,3.6),(3,3.3),(3.8,2.6),(4.4,2),(4.8,1.7),
+                  (1.2,2.2),(2.3,1.6),(3.3,1.1),(4.2,1.1),(4.7,1.3)}
+      \fill[blue!40] \p circle (1.4pt);
+  \fill (0,2.5) circle (2pt) node[left]{$x_S$};
+  \fill (5,1.5) circle (2pt) node[right]{$x_F$};
+  \draw[thick] (0,2.5) -- (0.5,1.6) -- (1.0,1.0) -- (1.5,0.6);
+  \foreach \p in {(0.5,1.6),(1.0,1.0)} \fill \p circle (1.7pt);
+  \fill (1.5,0.6) circle (2.2pt) node[left]{$x^j_t$};
+  \draw[thick, dashed, red!80!black, ->] (1.5,0.6) -- (2.3,0.55) -- (3.0,0.75) -- (3.6,1.2);
+  \foreach \p in {(2.3,0.55),(3.0,0.75)} \fill[red!80!black] \p circle (1.7pt);
+  \fill[red!80!black] (3.6,1.2) circle (2.2pt);
+  \draw[<-, red!80!black] (3.65,1.25) -- (4.6,0.65) node[right, align=left, font=\footnotesize]
+      {$x_{t+N|t}\in\CS^{j-1}$};
+  \node[font=\footnotesize, right] at (0.65,1.5) {realizzato};
+  \node[red!80!black, font=\footnotesize] at (2.6,0.18) {predetto ($N=3$)};
+\end{tikzpicture}
+\caption{Il problema LMPC all'istante $t$ dell'iterazione $j$ (schematico). La
+traiettoria predetta (tratteggiata) può uscire dal safe set convesso
+$\CS^{j-1}$, ma deve rientrarvi entro $N$ passi. Il costo dello stato finale
+predetto è valutato con $P^{j-1}$.}
+\label{fig:predizione}
+\end{figure}
+
+\subsection{Perché è un problema convesso}\label{sec:qp}
+
+Nel problema~\eqref{eq:lmpc} compare $P^{j-1}$, che è a sua volta il valore
+ottimo di un problema di minimo. Poiché si minimizza in entrambi i casi, i due
+problemi si fondono in uno solo, in cui i pesi $\lambda$ diventano variabili
+di decisione insieme agli ingressi. Si indichino con $\vett{D}^{j-1}$ la
+\emph{matrice dei dati}, le cui colonne sono gli stati memorizzati $x^i_s$, e
+con $\vett{c}^{j-1}$ il vettore dei corrispondenti costi realizzati
+$J^i_{s\to\infty}(x^i_s)$, per $i\in\Mc^{j-1}$:
+\[
+  \vett{D}^{j-1} = \big[\,x^0_0\ \ x^0_1\ \cdots\ x^{j-1}_{t_{j-1}}\,\big]\in\R^{n\times M},
+  \qquad
+  \vett{c}^{j-1} = \big[\,J^0_{0\to\infty}\ \ J^0_{1\to\infty}\ \cdots\,\big]^\top\in\R^{M},
+\]
+con $M$ numero totale di stati memorizzati. Il problema~\eqref{eq:lmpc}
+equivale a
+\begin{equation}\label{eq:lmpc-unico}
+\begin{aligned}
+  \min_{u_{t|t},\dots,u_{t+N-1|t},\ \lambda\in\R^M}\ &
+  \sum_{k=t}^{t+N-1} h(x_{k|t},u_{k|t}) + (\vett{c}^{j-1})^\top\lambda\\
+  \text{s.t. }\ & x_{k+1|t} = Ax_{k|t}+Bu_{k|t},\quad x_{t|t} = x^j_t,\\
+  & x_{k|t}\in\Xc,\ u_{k|t}\in\Uc,\\
+  & x_{t+N|t} = \vett{D}^{j-1}\lambda,\qquad \lambda\ge 0,\qquad \vett{1}^\top\lambda = 1.
+\end{aligned}
+\end{equation}
+Se $h$ è quadratico e $\Xc$, $\Uc$ sono poliedri:
+\begin{itemize}
+  \item il costo è quadratico negli ingressi (e negli stati, che ne sono
+        funzioni affini) e \emph{lineare} nei pesi $\lambda$;
+  \item tutti i vincoli sono lineari: la dinamica, i limiti, il legame
+        $x_{t+N|t}=\vett{D}^{j-1}\lambda$, la positività e la somma unitaria
+        dei pesi.
+\end{itemize}
+È quindi un QP. In forma \emph{condensata}, sostituendo la dinamica, lo stato
+finale predetto è
+$x_{t+N|t}=A^N x^j_t + \sum_{l=0}^{N-1}A^{N-1-l}Bu_{t+l|t}$, e il vincolo
+terminale diventa un vincolo di uguaglianza lineare tra ingressi e pesi:
+\[
+  \big[A^{N-1}B\ \ A^{N-2}B\ \cdots\ B\big]
+  \begin{bmatrix}u_{t|t}\\ \vdots\\ u_{t+N-1|t}\end{bmatrix}
+  - \vett{D}^{j-1}\lambda = -A^N x^j_t .
+\]
+L'insieme terminale non viene mai calcolato in forma esplicita (le sue facce):
+è descritto implicitamente dalle colonne di $\vett{D}^{j-1}$.
+
+\begin{osservazione}[Remark~4 del paper]
+Il paper sottolinea che il problema~\eqref{eq:lmpc} è convesso perché
+l'insieme terminale $\CS^{j-1}$ è convesso e il costo terminale $P^{j-1}$ è una
+funzione convessa (proposizione~\ref{prop:P}(a)), e indica questa
+formulazione convessa come il contributo principale rispetto al LMPC del 2016.
+(Nel testo del Remark~4 i riferimenti \eqp{18a} e \eqp{18e} sono scambiati:
+il vincolo terminale è \eqp{18e}, il costo terminale compare in \eqp{18a}.)
+\end{osservazione}
+
+\begin{osservazione}[Dimensione del problema]
+Il numero di variabili $\lambda$ è il numero di stati memorizzati, che cresce
+a ogni iterazione. Rispetto al MIP del 2016 il vantaggio è enorme (un QP con
+molte variabili continue si risolve in tempo polinomiale, un MIP con molte
+variabili binarie no), ma il problema continua a crescere. Nella pratica si
+usano solo sottoinsiemi dei dati (ad esempio le ultime iterazioni, o i punti
+vicini allo stato corrente); il paper non tratta questo aspetto.
+\end{osservazione}
+
+\subsection{L'iterazione zero}
+
+All'iterazione $j=1$ il problema~\eqref{eq:lmpc} usa $\CS^0$ e $P^0$, costruiti
+con la sola iterazione $0$. Serve quindi che esista almeno una prima
+traiettoria buona.
+
+\begin{ipotesi}[Assumption~1 del paper]\label{ip:iterazione-zero}
+È disponibile una traiettoria $\vett{x}^0$ dell'iterazione $0$, con ingressi
+$\vett{u}^0$, che parte da $x_S$, rispetta i vincoli e converge a $x_F$. Di
+conseguenza $0\in\Mc^0$ e $\CS^0$ non è vuoto.
+\end{ipotesi}
+
+La traiettoria iniziale non deve essere buona, deve solo essere
+\emph{ammissibile}: può venire da un controllore semplice e conservativo, da
+una manovra lenta, perfino da una dimostrazione manuale. Da lì in poi è il
+LMPC a migliorare.
+
+\subsection{Lo schema complessivo}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small, node distance=1.2cm,
+   blocco/.style={draw, rounded corners, align=center, minimum height=1.1cm, fill=gray!6}]
+  \node[blocco, minimum width=3.4cm] (lmpc) at (0,0) {LMPC\\ risolve il QP~\eqref{eq:lmpc-unico}};
+  \node[blocco, minimum width=3.4cm] (sys) at (6,0) {sistema\\ $x_{t+1}=Ax_t+Bu_t$};
+  \node[blocco, minimum width=4.6cm] (mem) at (0,2.6)
+     {dati delle iterazioni $0,\dots,j-1$\\ $\vett{D}^{j-1}$ (stati), $\vett{c}^{j-1}$ (costi)};
+  \draw[->, thick] (lmpc) -- node[above]{$u^j_t$} (sys);
+  \draw[->, thick] (sys.east) -- ++(0.7,0) |- ($(lmpc.south)+(0,-0.7)$)
+      node[pos=0.75, below]{$x^j_t$} -- (lmpc.south);
+  \draw[->, thick] (mem) -- node[right]{$\CS^{j-1}$, $P^{j-1}$} (lmpc);
+  \draw[->, dashed] (sys.north) |- (mem.east);
+  \node[right, align=left, font=\footnotesize] at ($(sys.north)+(0.1,1.2)$)
+      {a fine iterazione:\\ si aggiunge la traiettoria $j$\\ e i suoi costi};
+\end{tikzpicture}
+\caption{Schema del LMPC. Dentro un'iterazione è un MPC con insieme e costo
+terminali fissi. Tra un'iterazione e l'altra i dati vengono aggiornati.}
+\label{fig:schema}
+\end{figure}
+
+\medskip
+\noindent\fbox{\begin{minipage}{0.96\textwidth}
+\smallskip
+\textbf{Algoritmo LMPC (sistemi lineari).}
+\begin{enumerate}
+  \item \emph{Inizializzazione.} Si esegue l'iterazione $0$ con un controllore
+        qualsiasi che porti da $x_S$ a $x_F$ nel rispetto dei vincoli. Si
+        memorizzano stati e ingressi e si calcolano i costi realizzati con
+        la~\eqref{eq:ricorsione-costi}.
+  \item \emph{Iterazione $j=1,2,\dots$}: si pone $t=0$, $x^j_0=x_S$; finché
+        l'iterazione non è conclusa:
+  \begin{enumerate}
+    \item si misura $x^j_t$;
+    \item si risolve il QP~\eqref{eq:lmpc-unico} con i dati delle iterazioni
+          $0,\dots,j-1$;
+    \item si applica $u^j_t=u^{*,j}_{t|t}$ e si pone $t\leftarrow t+1$.
+  \end{enumerate}
+  \item \emph{Aggiornamento.} Si aggiungono a $\vett{D}$ gli stati
+        dell'iterazione $j$ e a $\vett{c}$ i loro costi realizzati, calcolati
+        a ritroso. Si passa all'iterazione $j+1$.
+\end{enumerate}
+\smallskip
+\end{minipage}}
+\medskip
+
+% ===========================================================================
+\section{Fattibilità ricorsiva e stabilità}\label{sec:stabilita}
+% ===========================================================================
+
+\begin{teorema}[Teorema~1 del paper]\label{teo:1}
+Si consideri il sistema~\eqref{eq:sistema} controllato dal LMPC~\eqref{eq:lmpc},
+\eqref{eq:legge}, con $\CS^j$ definito da~\eqref{eq:CS}, e valga
+l'ipotesi~\ref{ip:iterazione-zero}. Allora, per ogni iterazione $j\ge 1$:
+\begin{enumerate}
+  \item il problema~\eqref{eq:lmpc} ha soluzione per ogni $t\in\Zn$
+        (e quindi i vincoli non sono mai violati);
+  \item l'equilibrio $x_F$ è asintoticamente stabile per l'anello
+        chiuso~\eqref{eq:sistema}, \eqref{eq:legge}.
+\end{enumerate}
+\end{teorema}
+
+Il paper scrive che ``la dimostrazione segue da argomenti standard di MPC''.
+Alla luce della sezione~\ref{sec:richiami} il motivo è chiaro: è il
+teorema~\ref{teo:mpc} con $(\Xf,V_f)=(\CS^{j-1},P^{j-1})$, e il
+lemma~\ref{lem:decrescita} garantisce che questa coppia soddisfa
+l'ipotesi~\ref{ip:terminali}. Conviene comunque seguire i passi del paper, che
+rendono esplicito il ruolo dei dati.
+
+\paragraph{Passo 1: fattibilità all'istante iniziale (\eqp{21}--\eqp{22}).}
+Per la~\eqref{eq:CS-monotono}, $\CS^0\subseteq\CS^{j-1}$ per ogni $j\ge 1$, e
+$\CS^0$ non è vuoto per l'ipotesi~\ref{ip:iterazione-zero}. All'istante $t=0$
+dell'iterazione $j$ lo stato è $x^j_0=x_S=x^0_0$. I primi $N$ passi
+dell'iterazione zero,
+\[
+  [x^0_0,\,x^0_1,\,\dots,\,x^0_N],\qquad [u^0_0,\,u^0_1,\,\dots,\,u^0_{N-1}],
+\]
+sono una soluzione ammissibile di~\eqref{eq:lmpc}: partono dallo stato giusto,
+rispettano dinamica e vincoli (sono stati realizzati) e terminano in
+$x^0_N\in\SSet^0\subseteq\CS^0\subseteq\CS^{j-1}$.
+
+\paragraph{Passo 2: dalla fattibilità in $t$ a quella in $t+1$ (\eqp{23}--\eqp{28}).}
+Sia il problema risolto all'istante $t$, con soluzione ottima
+$\vett{u}^{*,j}_{t:t+N|t}$, $\vett{x}^{*,j}_{t:t+N|t}$. Il vincolo terminale dà
+$x^{*,j}_{t+N|t}\in\CS^{j-1}$; siano $\lambda^{*,i}_s$ i pesi che realizzano
+$P^{j-1}(x^{*,j}_{t+N|t})$ (\eqp{24}). Con questi pesi si costruiscono
+(\eqp{25}--\eqp{26})
+\[
+  \bar u = \sum_{i,s}\lambda^{*,i}_s u^i_s\in\Uc,\qquad
+  \bar x = Ax^{*,j}_{t+N|t}+B\bar u = \sum_{i,s}\lambda^{*,i}_s x^i_{s+1}\in\CS^{j-1}.
+\]
+Poiché il modello di predizione coincide con il sistema, lo stato realizzato
+all'istante successivo è quello predetto (\eqp{27}):
+\begin{equation}\label{eq:modello-esatto}
+  x^j_{t+1} = x^{*,j}_{t+1|t}.
+\end{equation}
+All'istante $t+1$ la sequenza traslata (\eqp{28})
+\[
+  [u^{*,j}_{t+1|t},\,\dots,\,u^{*,j}_{t+N-1|t},\ \bar u],\qquad
+  [x^{*,j}_{t+1|t},\,\dots,\,x^{*,j}_{t+N|t},\ \bar x]
+\]
+parte dallo stato corretto, rispetta dinamica e vincoli e termina in
+$\CS^{j-1}$: è ammissibile (figura~\ref{fig:traslazione}). Per induzione su
+$t$, il problema ha soluzione a ogni istante.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small, scale=1.1]
+  \fill[blue!10] (4,3) -- (5.5,3.6) -- (5.2,2.2) -- cycle;
+  \fill[teal!12] (5,2.4) -- (6.4,2.9) -- (6,1.5) -- cycle;
+  \foreach \a/\b in {{(4,3)}/{(5,2.4)}, {(5.5,3.6)}/{(6.4,2.9)}, {(5.2,2.2)}/{(6,1.5)}}
+     \draw[->, gray] \a -- \b;
+  \foreach \p in {(4,3),(5.5,3.6),(5.2,2.2)} \fill[blue!60!black] \p circle (1.8pt);
+  \foreach \p in {(5,2.4),(6.4,2.9),(6,1.5)} \fill[teal!70!black] \p circle (1.8pt);
+  \node[blue!60!black, above left] at (4,3) {$x^{i}_{s}$};
+  \node[teal!70!black, below right] at (6,1.5) {$x^{i}_{s+1}$};
+  \draw[thick, blue] (0,1) -- (1.4,2.0) -- (2.8,2.6) -- (4.93,2.86);
+  \foreach \p in {(1.4,2.0),(2.8,2.6)} \fill[blue] \p circle (1.8pt);
+  \fill (0,1) circle (2pt) node[below]{$x^j_t$};
+  \fill[blue] (4.93,2.86) circle (2.2pt);
+  \draw[blue, thin] (4.93,2.86) -- (4.5,3.75) node[above]{$x^{*,j}_{t+N|t}$};
+  \draw[thick, dashed, red!80!black] (1.4,2.0) -- (2.8,2.6) -- (4.93,2.86) -- (5.82,2.19);
+  \fill[red!80!black] (5.82,2.19) circle (2.2pt) node[below left]{$\bar x$};
+  \node[red!80!black, font=\footnotesize] at (5.55,2.55) {$\bar u$};
+  \node[below right] at (1.4,2.0) {$x^j_{t+1}$};
+\end{tikzpicture}
+\caption{Argomento della traslazione. Lo stato finale predetto all'istante $t$
+(blu) è combinazione convessa di alcuni stati memorizzati (triangolo blu).
+Applicando la stessa combinazione dei loro ingressi si arriva in $\bar x$, la
+stessa combinazione dei loro successori (triangolo verde), che è ancora in
+$\CS^{j-1}$. La traiettoria rossa tratteggiata è la candidata ammissibile
+all'istante $t+1$.}
+\label{fig:traslazione}
+\end{figure}
+
+\paragraph{Passo 3: il costo ottimo come funzione di Lyapunov (\eqp{29}--\eqp{32}).}
+All'interno dell'iterazione $j$ il problema~\eqref{eq:lmpc} non dipende da
+$t$ (dinamica, vincoli, $\CS^{j-1}$ e $P^{j-1}$ sono fissi): il suo valore ottimo
+è una funzione del solo stato, che si indica con $\JL(\cdot)$. Si vuole
+mostrare che è una funzione di Lyapunov per $x_F$.
+
+\begin{itemize}
+  \item \emph{Positività.} Per $x\ne x_F$ il costo ottimo contiene almeno il
+        termine $h(x,u_{t|t})>0$; in $x_F$ la soluzione $u=0$ mantiene lo
+        stato in $x_F\in\CS^{j-1}$ con costo nullo, quindi $\JL(x_F)=0$.
+  \item \emph{Continuità.} Si dimostra come in Mayne et al.~(2000); il paper
+        non entra nei dettagli.
+  \item \emph{Decrescita.} Si scrive il costo ottimo in $t$ separando il primo
+        termine e sviluppando $P^{j-1}$ con la~\eqref{eq:P-esplicita}
+        (\eqp{30}); con la disuguaglianza di Jensen e la definizione di
+        $P^{j-1}$ come minimo, esattamente come nel lemma~\ref{lem:decrescita},
+        si ottiene (\eqp{31})
+        \[
+        \begin{aligned}
+          \JL(x^j_t) &\ge h(x^j_t,u^j_t)
+          + \underbrace{\sum_{k=t+1}^{t+N-1}h(x^{*,j}_{k|t},u^{*,j}_{k|t})
+          + h(x^{*,j}_{t+N|t},\bar u) + P^{j-1}(\bar x)}_{\text{costo della candidata in } t+1}\\
+          &\ge h(x^j_t,u^j_t) + \JL(x^j_{t+1}).
+        \end{aligned}
+        \]
+        L'ultima disuguaglianza vale perché il costo ottimo in $t+1$ non supera
+        quello della candidata ammissibile del passo 2.
+\end{itemize}
+Si ottiene così (\eqp{32})
+\begin{equation}\label{eq:lyapunov-lmpc}
+  \JL(x^j_{t+1}) - \JL(x^j_t) \le -h(x^j_t,u^j_t) < 0
+  \qquad \forall x^j_t\ne x_F,
+\end{equation}
+e il teorema di Lyapunov dà la stabilità asintotica di $x_F$.
+
+\begin{osservazione}[Regione di attrazione]
+Il LMPC all'iterazione $j$ funziona da ogni stato da cui sia possibile entrare
+in $\CS^{j-1}$ in $N$ passi rispettando i vincoli. Nel linguaggio del libro è
+l'\emph{insieme controllabile in $N$ passi} $K_N(\CS^{j-1})$
+(sezione~\ref{sec:libro-insiemi}). Poiché $\CS^{j-1}$ cresce con
+$j$, cresce anche questa regione: le iterazioni non migliorano solo il costo,
+ma anche l'insieme degli stati da cui il controllore è in grado di operare.
+\end{osservazione}
+
+% ===========================================================================
+\section{Miglioramento e ottimalità}\label{sec:convergenza}
+% ===========================================================================
+
+\subsection{Il costo non peggiora da un'iterazione all'altra}
+
+\begin{teorema}[Teorema~2 del paper]\label{teo:2}
+Nelle ipotesi del teorema~\ref{teo:1}, il costo di ogni iterazione non
+supera quello della precedente:
+\[
+  J^{j}_{0\to\infty}(x_S)\le J^{j-1}_{0\to\infty}(x_S)\qquad\forall j\ge 1.
+\]
+\end{teorema}
+
+Il paper rimanda la dimostrazione al lavoro del 2016. Con gli strumenti di
+questo documento la si ricostruisce in due passaggi.
+
+\paragraph{Prima disuguaglianza: il costo predetto in $x_S$ non supera il costo dell'iterazione precedente.}
+L'iterazione $j-1$ è riuscita (teorema~\ref{teo:1} o ipotesi~\ref{ip:iterazione-zero}
+se $j=1$), quindi i suoi dati sono in $\CS^{j-1}$. I suoi primi $N$ passi sono
+una soluzione ammissibile di~\eqref{eq:lmpc} in $x_S$ (come nel passo 1 del
+teorema~\ref{teo:1}). Il loro costo, usando la proposizione~\ref{prop:P}(c), è
+\[
+  \sum_{k=0}^{N-1}h(x^{j-1}_k,u^{j-1}_k) + P^{j-1}(x^{j-1}_N)
+  \le \sum_{k=0}^{N-1}h(x^{j-1}_k,u^{j-1}_k) + J^{j-1}_{N\to\infty}(x^{j-1}_N)
+  = J^{j-1}_{0\to\infty}(x_S).
+\]
+Il costo ottimo non supera quello di una soluzione ammissibile:
+$\JL(x_S)\le J^{j-1}_{0\to\infty}(x_S)$.
+
+\paragraph{Seconda disuguaglianza: il costo realizzato non supera il costo predetto.}
+Sommando la~\eqref{eq:lyapunov-lmpc} da $t=0$ a $t=T$ i termini si
+cancellano a due a due (somma telescopica):
+\[
+  \sum_{t=0}^{T}h(x^j_t,u^j_t) \le \JL(x^j_0) - \JL(x^j_{T+1}) \le \JL(x_S),
+\]
+perché $\JL\ge 0$. Per $T\to\infty$: $J^j_{0\to\infty}(x_S)\le\JL(x_S)$.
+
+\medskip
+\noindent
+Mettendo insieme:
+\begin{equation}\label{eq:catena}
+  \Jstar(x_S)\ \le\ J^j_{0\to\infty}(x_S)\ \le\ \JL(x_S)\ \le\ J^{j-1}_{0\to\infty}(x_S).
+\end{equation}
+La prima disuguaglianza vale perché la traiettoria dell'iterazione $j$ è
+ammissibile per il problema a orizzonte infinito. La successione dei costi di
+iterazione è quindi \emph{non crescente e limitata inferiormente}: converge
+sempre a un limite. Il teorema successivo dice qual è.
+
+\subsection{La traiettoria limite è ottima}
+
+\begin{teorema}[Teorema~3 del paper]\label{teo:3}
+Nelle ipotesi del teorema~\ref{teo:1}, con $N>1$, si supponga che le
+traiettorie in anello chiuso convergano, per $j\to\infty$, a una traiettoria
+stazionaria $\vett{x}^\infty=\lim_j\vett{x}^j$ con ingressi
+$\vett{u}^\infty=\lim_j\vett{u}^j$. Allora $(\vett{x}^\infty,\vett{u}^\infty)$
+è una soluzione ottima globale del problema a orizzonte
+infinito~\eqref{eq:ottimo-infinito}: $\vett{x}^\infty=\vett{x}^*$,
+$\vett{u}^\infty=\vett{u}^*$.
+\end{teorema}
+
+Anche questa dimostrazione è rimandata al lavoro del 2016; qui se ne dà
+l'idea, senza pretesa di completezza.
+\begin{itemize}
+  \item Quando le iterazioni non cambiano più, la traiettoria stazionaria fa
+        parte dei dati, e lungo di essa il costo terminale coincide con il
+        costo realmente pagato. A ogni istante il LMPC potrebbe scegliere di
+        deviarne per $N$ passi e poi rientrare in $\CS$; se non lo fa, è perché
+        \emph{nessuna modifica di $N$ ingressi consecutivi} migliora il costo.
+        La traiettoria stazionaria è quindi un punto in cui non esistono
+        miglioramenti ``locali'' (nel senso di modifiche su finestre di $N$
+        passi).
+  \item Il problema a orizzonte infinito~\eqref{eq:ottimo-infinito}, per un
+        sistema lineare con vincoli convessi e costo convesso, è un problema
+        \emph{convesso}. In un problema convesso un punto che non si può
+        migliorare localmente è un ottimo globale
+        (sezione~\ref{sec:ottimizzazione}).
+\end{itemize}
+Per sistemi non lineari (il lavoro del 2016) lo stesso ragionamento dà solo
+un ottimo locale; è la convessità, cioè ancora una volta la linearità del
+sistema, a renderlo globale. (L'introduzione della sezione 3.3 del paper parla
+di ottimo ``locale'', ma l'enunciato del teorema~3 è di ottimalità globale,
+coerentemente con questa osservazione.)
+
+Due cautele nella lettura del teorema~\ref{teo:3}:
+\begin{itemize}
+  \item la convergenza delle traiettorie è un'\emph{ipotesi}, non una tesi: il
+        teorema~\ref{teo:2} garantisce che i \emph{costi} convergono, ma non che
+        le traiettorie convergano;
+  \item l'ipotesi $N>1$ è richiesta dalla dimostrazione del 2016; il paper non
+        commenta che cosa possa succedere con $N=1$.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[>=Stealth, font=\small, x=0.9cm, y=1.3cm]
+  \draw[->] (-0.2,0) -- (8,0) node[right]{iterazione $j$};
+  \draw[->] (0,-0.1) -- (0,3.4) node[left]{costo di iterazione};
+  \draw[dashed, red!70!black] (0,0.8) -- (7.6,0.8) node[right]{$\Jstar(x_S)$};
+  \foreach \j in {0,...,7}{
+     \fill[blue!70!black] ({\j},{0.8+2.2*exp(-1.6*\j)}) circle (2.2pt);
+     \draw (\j,0.05) -- (\j,-0.05) node[below]{$\j$};
+  }
+  \draw[blue!70!black, thin] plot[domain=0:7, samples=40] (\x,{0.8+2.2*exp(-1.6*\x)});
+  \node[blue!70!black, right] at (0.2,3.0) {$J^j_{0\to\infty}(x_S)$};
+\end{tikzpicture}
+\caption{Andamento qualitativo del costo di iterazione previsto dai
+teoremi~\ref{teo:2} e~\ref{teo:3}: non cresce mai e, se le traiettorie
+convergono, tende al costo ottimo a orizzonte infinito. Nell'esempio del paper
+quasi tutto il miglioramento avviene alla prima iterazione.}
+\label{fig:costo-iterazioni}
+\end{figure}
+
+% ===========================================================================
+\section{L'esempio del paper: LQR vincolato}\label{sec:esempio}
+% ===========================================================================
+
+\paragraph{Il problema di prova.}
+Il paper verifica il LMPC su un regolatore lineare quadratico vincolato a
+orizzonte infinito (\eqp{33}):
+\[
+  \min_{u_0,u_1,\dots}\sum_{k=0}^{\infty}\big(\|x_k\|_2^2+\|u_k\|_2^2\big),
+  \qquad
+  x_{k+1}=\begin{bmatrix}1&1\\0&1\end{bmatrix}x_k+\begin{bmatrix}0\\1\end{bmatrix}u_k,
+\]
+con $x_0=x_S$, limiti $-4\le x_k\le 4$ su ciascuna componente e $-1\le u_k\le 1$.
+Il sistema è un \emph{doppio integratore} discreto: la prima componente dello
+stato è una posizione, la seconda una velocità, l'ingresso un'accelerazione.
+L'equilibrio è $x_F=0$, il costo è quadratico e definito positivo, i vincoli
+sono scatole: tutte le ipotesi del paper sono soddisfatte. La scelta è
+didattica per un motivo preciso: per questo problema la soluzione ottima
+esatta a orizzonte infinito si può calcolare (con l'algoritmo di Borrelli,
+2003), e quindi si può verificare se il LMPC la trova davvero.
+
+\paragraph{Implementazione.}
+Il LMPC è scritto come QP (sezione~\ref{sec:qp}) con YALMIP e risolto con
+\texttt{quadprog}. Per avere iterazioni di durata finita, il paper considera
+conclusa l'iterazione $j$ al primo istante in cui il costo ottimo predetto
+scende sotto una soglia piccolissima (\eqp{34}):
+\[
+  t_j = \min\big\{t\in\Zn : \JL(x^j_t)\le\varepsilon\big\},
+\]
+cioè quando lo stato è, a tutti gli effetti, arrivato all'equilibrio. Le
+somme della funzione baricentrica sono troncate a $t_j$ come
+in~\eqp{17}.
+
+\paragraph{Risultati (lettura qualitativa).}
+\begin{itemize}
+  \item \emph{Miglioramento monotono} (Table~1 del paper). Il costo di
+        iterazione non cresce mai, come previsto dal teorema~\ref{teo:2}. Il
+        salto più grande avviene alla prima iterazione (la traiettoria
+        iniziale è volutamente non ottima); le iterazioni successive limano
+        differenze sempre più piccole, fino a stabilizzarsi.
+  \item \emph{Convergenza all'ottimo vero} (equazioni \eqp{36}--\eqp{39}). La
+        traiettoria stazionaria del LMPC coincide con quella ottima del CLQR
+        calcolata in modo esatto, a meno di errori dell'ordine della
+        precisione numerica, sia come stati sia come costo. È la verifica
+        sperimentale del teorema~\ref{teo:3}.
+  \item \emph{Ruolo dell'orizzonte} (Table~2). Il risultato vale per diversi
+        stati iniziali e diversi orizzonti, anche cortissimi ($N=2$): un
+        orizzonte corto, accompagnato da un costo terminale imparato, basta a
+        raggiungere l'ottimo a orizzonte \emph{infinito}. Quello che cambia è
+        la velocità: con orizzonte più lungo il controllore ha più libertà di
+        esplorare lo spazio di stato in ogni iterazione, e converge in molte
+        meno iterazioni (decine con $N=2$, una decina con $N=4$).
+  \item \emph{Costo computazionale}. Sullo stesso problema, il LMPC convesso
+        converge in decine di secondi, quello del 2016 basato su MIP in ore.
+        È la conferma del contributo principale del paper.
+\end{itemize}
+
+% ===========================================================================
+\section{Collegamenti con il libro di Borrelli, Bemporad e Morari}\label{sec:libro}
+% ===========================================================================
+
+Il paper occupa sei pagine e per quasi tutti i risultati di base rimanda ad
+``argomenti standard di MPC'' (Mayne et al., 2000) e a Borrelli (2003). Quegli
+argomenti sono esposti in modo sistematico nel libro \emph{Predictive Control
+for Linear and Hybrid Systems} di F.~Borrelli, A.~Bemporad e M.~Morari
+(2017), indicato qui come [BBM]. Leggere il paper con il libro accanto mostra
+una cosa importante: \textbf{il LMPC non introduce una nuova teoria della
+stabilità}. Riusa il teorema di stabilità dell'MPC del libro, e sostituisce
+gli ingredienti terminali, che nel libro sono progettati con il regolatore
+LQR e con operazioni sui poliedri, con ingredienti ricavati dai dati. Anche lo
+strumento con cui li ricava, l'interpolazione baricentrica, è nel libro, nel
+capitolo~13, usato però per uno scopo diverso.
+
+La tabella~\ref{tab:mappa} riassume i collegamenti; le sottosezioni li
+discutono uno per uno.
+
+\begin{table}[h]
+\centering
+\caption{Dove si trovano nel libro i concetti usati dal paper.}\label{tab:mappa}
+\small
+\begin{tabular}{p{4.1cm}p{3.6cm}p{6.6cm}}
+\toprule
+Nel paper & Nel libro & Che cosa dice il libro \\
+\midrule
+Problema a orizzonte infinito \eqp{5}, CLQR \eqp{33}
+  & Sez.~7.4, 11.3.4--11.3.5
+  & equazione di Bellman, soluzione esatta del CLQR affine a tratti
+    (Teorema~11.4) e algoritmo per calcolarla, usato dal paper come
+    riferimento \\
+Safe set, invarianza
+  & Def.~10.9--10.13, Teoremi~11.2 e~12.1
+  & insiemi controllabili e invarianti, insiemi ammissibili dell'MPC,
+    fattibilità ricorsiva \\
+Inviluppo convesso \eqp{10}
+  & Sez.~4.2, 4.4.2
+  & rappresentazioni V e H dei politopi, costo del cambio di
+    rappresentazione \\
+Teorema~1 (stabilità)
+  & Teorema~12.2, Remark~12.2--12.3
+  & ipotesi (A0)--(A3) su insieme e costo terminali, funzione di Lyapunov
+    di controllo \\
+Funzione baricentrica \eqp{14}--\eqp{15}
+  & Cap.~13 (Def.~13.1, Lemmi~13.1--13.2, Teorema~13.2)
+  & interpolazione baricentrica, proprietà dell'inviluppo convesso,
+    sovrastima del costo ottimo \\
+Convessità di $P^j$, Remark~4
+  & Teorema~6.5, Corollario~5.1, Teorema~6.7
+  & la funzione valore di un programma multiparametrico convesso è
+    convessa; per un mp-LP è anche continua e affine a tratti \\
+LMPC non lineare del 2016 (MIP)
+  & Sez.~2.4, 16.4, 17.4
+  & vincoli logici come variabili binarie, MIQP, branch and bound \\
+Esempio: doppio integratore
+  & Esempi~11.1, 11.2, 12.1
+  & lo stesso sistema, usato per insiemi ammissibili, CLQR esplicito e
+    perdita di fattibilità del receding horizon \\
+Limiti: disturbi, incertezze
+  & Sez.~10.3--10.4, Cap.~15
+  & insiemi invarianti robusti, MPC robusto \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Corrispondenza di notazione.}
+Il libro chiama $q(x,u)$ il costo di stadio (qui $h$), $p(x)$ il costo
+terminale (qui $V_f$, e nel LMPC $P^{j-1}$) e $\Xf$ l'insieme terminale (nel
+LMPC $\CS^{j-1}$). Il libro usa la lettera $P$ per la \emph{matrice} del costo
+terminale quadratico $x^\top Px$: non va confusa con la \emph{funzione} $P^j$
+del paper. Infine il libro pone l'equilibrio nell'origine, mentre il paper lo
+chiama $x_F$; poiché $x_F = Ax_F$, il cambio di variabile $x\mapsto x-x_F$
+trasforma il sistema del paper in uno con equilibrio nell'origine, con la
+stessa dinamica, e i risultati si trasferiscono senza modifiche.
+
+\subsection{Il Teorema~1 del paper è il Teorema~12.2 del libro}\label{sec:libro-teorema}
+
+Il Teorema~12.2 del libro è il risultato di riferimento sulla fattibilità e
+stabilità dell'MPC: il libro stesso, nella sezione~12.8, lo indica come ``il
+risultato principale'' su fattibilità e stabilità e ne fa risalire l'idea a
+Keerthi e Gilbert. Le sue ipotesi, nella notazione di questo documento, e il modo in
+cui il LMPC le soddisfa sono:
+\begin{itemize}
+  \item \textbf{(A0)} costo di stadio e costo terminale continui e definiti
+        positivi. Per $h$ è l'ipotesi~\eqp{6}. Per $P^{j-1}$: è continua su
+        $\CS^{j-1}$ (sezione~\ref{sec:libro-mp}), si annulla in $x_F$ e per
+        $x\ne x_F$ vale $P^{j-1}(x)\ge\Jstar(x)>0$
+        (proposizione~\ref{prop:P}(b)).
+  \item \textbf{(A1)} $\Xc$, $\Uc$, $\Xf$ chiusi e contenenti l'equilibrio
+        nel loro \emph{interno}: su questo punto si veda l'osservazione
+        qui sotto.
+  \item \textbf{(A2)} $\Xf$ controllo-invariante e contenuto in $\Xc$: è la
+        proposizione~\ref{prop:CS-invariante}.
+  \item \textbf{(A3)}
+        $\displaystyle\min_{v\in\Uc,\,Ax+Bv\in\Xf}\big(-p(x)+q(x,v)+p(Ax+Bv)\big)\le 0$
+        per ogni $x\in\Xf$: è il lemma~\ref{lem:decrescita}, con
+        $v=\bar u$.
+\end{itemize}
+La dimostrazione del libro (equazioni~(12.19)--(12.20) di [BBM]) è la stessa
+del paper (\eqp{28}--\eqp{32}): sequenza traslata più un ingresso finale
+fornito da (A3), confronto con l'ottimo, decrescita del costo ottimo. L'unica
+parte che il paper deve scrivere esplicitamente è la verifica di (A3), che nel
+libro è garantita in fase di progetto (con il costo LQR, equazioni~(12.24)--(12.26)
+di [BBM], vale con il segno di uguaglianza) e che nel paper discende dalla
+disuguaglianza di Jensen applicata ai dati. In questo senso il contributo
+teorico del paper sta tutto nella sezione~\ref{sec:costo-terminale}: mostrare
+che $(\CS^{j-1},P^{j-1})$ soddisfa (A2) e (A3).
+
+Il libro contiene anche, nella sezione~7.4.2 (Teorema~7.1), la versione più
+semplice dello stesso ragionamento, con vincolo terminale $x_N=0$: la sequenza
+ottima traslata e completata con ingresso nullo è ammissibile al passo
+successivo, e il costo ottimo decresce del costo di stadio. È utile
+leggerla prima del Teorema~12.2, perché isola l'idea della traslazione senza
+gli ingredienti terminali.
+
+\begin{osservazione}[L'ipotesi (A1) e l'equilibrio sul bordo di $\CS^{j-1}$]
+Nel libro (A1) serve a dimostrare la continuità del costo ottimo
+nell'equilibrio, tramite la disuguaglianza $J^*_0(x)\le p(x)$ su $\Xf$
+(equazione~(12.23) di [BBM]). Nel LMPC l'equilibrio $x_F$ è l'ultimo punto di
+tutte le traiettorie memorizzate e di solito sta sul \emph{bordo}
+dell'inviluppo convesso, spesso su un vertice (si veda la
+figura~\ref{fig:safe-set}), non al suo interno. La disuguaglianza
+$\JL(x)\le P^{j-1}(x)$ su $\CS^{j-1}$ si ottiene comunque con lo stesso
+argomento del libro (iterando il lemma~\ref{lem:decrescita}), ma la stabilità
+va intesa rispetto all'insieme degli stati ammissibili, come nel teorema di
+Lyapunov del libro (Teorema~7.2, enunciato su un insieme che contiene
+l'origine, non necessariamente nel suo interno). Il paper non entra in questo
+dettaglio e rimanda a Mayne et al.\ per la continuità.
+\end{osservazione}
+
+\begin{osservazione}[Il problema che il LMPC risolve, nelle parole del libro]
+Nel Remark~12.2 il libro osserva che la procedura del Teorema~12.2 è in
+generale \emph{conservativa}: introdurre un insieme terminale artificiale
+riduce la regione di attrazione e può peggiorare le prestazioni. Con la
+scelta standard ($\Xf$ = massimo insieme invariante del sistema in anello
+chiuso con il guadagno LQR, costo terminale $x^\top P_\infty x$) l'insieme
+terminale è un intorno dell'equilibrio in cui i vincoli non sono attivi, di
+solito piccolo. Il LMPC risponde proprio a questa osservazione: l'insieme
+terminale non è un intorno piccolo costruito attorno all'equilibrio, ma
+l'insieme di tutti gli stati da cui si sa già, per esperienza, come arrivare
+all'equilibrio; e cresce con le iterazioni.
+\end{osservazione}
+
+\subsection{Insiemi controllabili, invarianti e regione di attrazione}\label{sec:libro-insiemi}
+
+Il capitolo~10 del libro dà il linguaggio preciso per parlare della regione in
+cui il LMPC funziona. Le definizioni che servono sono:
+\begin{itemize}
+  \item l'\emph{insieme predecessore} \libro{Def.~10.2}
+        $\mathrm{Pre}(S)=\{x: \exists u\in\Uc,\ Ax+Bu\in S\}$, gli stati che
+        possono essere portati in $S$ in un passo;
+  \item l'\emph{insieme controllabile in $N$ passi} \libro{Def.~10.5},
+        $K_N(S)$, definito ricorsivamente da $K_0(S)=S$ e
+        $K_i(S)=\mathrm{Pre}(K_{i-1}(S))\cap\Xc$: gli stati che possono essere
+        portati in $S$ in $N$ passi rispettando i vincoli;
+  \item il \emph{massimo insieme controllo-invariante} $\mathcal{C}_\infty$
+        \libro{Def.~10.10}, il più grande insieme in cui si può tenere lo
+        stato per sempre rispettando i vincoli;
+  \item per il CLQR, l'insieme $\Xc_\infty$ degli stati da cui il problema
+        a orizzonte infinito ha costo finito \libro{eq.~(11.44)}, che il
+        libro identifica con il massimo insieme stabilizzabile verso
+        l'equilibrio. È il dominio di $\Jstar$.
+\end{itemize}
+Il Teorema~11.2 del libro dice che, se l'insieme terminale $\Xf$ è
+controllo-invariante, l'insieme degli stati da cui il problema MPC ha
+soluzione è $K_N(\Xf)$, che è a sua volta controllo-invariante e contenuto in
+$\mathcal{C}_\infty$. Il Teorema~12.1 ne ricava la fattibilità ricorsiva,
+\emph{qualunque sia la funzione di costo}. Applicati al LMPC:
+\begin{itemize}
+  \item all'iterazione $j$ il LMPC ha soluzione esattamente in
+        $K_N(\CS^{j-1})$, che è controllo-invariante;
+  \item la fattibilità ricorsiva dipende solo da $\CS^{j-1}$, non da
+        $P^{j-1}$: il costo terminale serve per la stabilità e per il
+        miglioramento, non per la fattibilità;
+  \item poiché ogni punto di $\CS^{j-1}$ ha costo $\Jstar$ finito
+        (proposizione~\ref{prop:P}(b)), vale la catena di inclusioni
+        \begin{equation}\label{eq:inclusioni}
+          \{x_F\}\subseteq\CS^0\subseteq\CS^{j-1}\subseteq K_N(\CS^{j-1})
+          \subseteq\Xc_\infty\subseteq\mathcal{C}_\infty\subseteq\Xc,
+        \end{equation}
+        illustrata nella figura~\ref{fig:inclusioni}.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[font=\small, scale=1.05]
+  \draw[gray] (0,0) rectangle (9,5);
+  \node[gray, below left] at (9,5) {$\Xc$};
+  \draw[fill=gray!10] (4.5,2.5) ellipse (4.2 and 2.2);
+  \node at (4.5,4.4) {$\mathcal{C}_\infty$};
+  \draw[fill=orange!12] (4.8,2.4) ellipse (3.4 and 1.75);
+  \node at (4.8,3.85) {$\Xc_\infty$};
+  \draw[fill=green!12] (5.2,2.3) ellipse (2.5 and 1.3);
+  \node at (5.0,3.25) {$K_N(\CS^{j-1})$};
+  \fill[blue!18] (4.2,2.2) -- (5.0,2.9) -- (6.6,2.6) -- (7.0,1.9) -- (5.6,1.5) -- cycle;
+  \draw[blue!60] (4.2,2.2) -- (5.0,2.9) -- (6.6,2.6) -- (7.0,1.9) -- (5.6,1.5) -- cycle;
+  \fill[blue!35] (4.2,2.2) -- (5.0,2.5) -- (5.9,2.0) -- (5.6,1.5) -- cycle;
+  \node[font=\footnotesize] at (5.15,2.05) {$\CS^0$};
+  \node[font=\footnotesize] at (6.35,2.25) {$\CS^{j-1}$};
+  \fill (4.2,2.2) circle (1.6pt) node[left]{$x_S$};
+  \fill (5.6,1.5) circle (1.6pt) node[below]{$x_F$};
+\end{tikzpicture}
+\caption{Gli insiemi della catena~\eqref{eq:inclusioni} (schematico). Il
+safe set convesso cresce con le iterazioni dentro $\Xc_\infty$, il dominio
+della funzione valore ottima $\Jstar$; la regione in cui il LMPC ha soluzione è l'insieme degli stati
+da cui lo si raggiunge in $N$ passi.}
+\label{fig:inclusioni}
+\end{figure}
+
+Il confronto con il modo in cui il libro calcola questi insiemi è istruttivo.
+Gli algoritmi~10.2 e~10.3 di [BBM] calcolano $\mathcal{C}_\infty$ e gli insiemi
+stabilizzabili iterando l'operatore $\mathrm{Pre}$, cioè proiezioni di poliedri
+in rappresentazione H; in generale non è garantito che terminino in un numero
+finito di passi, e il costo cresce rapidamente con la dimensione dello stato.
+Il LMPC ottiene invece, \emph{senza alcuna operazione sugli insiemi}, un
+sottoinsieme controllo-invariante di $\Xc_\infty$ in rappresentazione V: i
+dati stessi ne sono i generatori. È un'approssimazione interna, che dipende
+da quali regioni dello spazio di stato le iterazioni hanno visitato, ma è
+disponibile gratuitamente e si allarga da sola.
+
+\subsection{La funzione baricentrica e il capitolo~13}\label{sec:libro-baricentrica}
+
+Il paper attribuisce la funzione baricentrica a Jones e Morari (2010). Il
+capitolo~13 del libro, scritto da C.~N.~Jones, espone la stessa teoria nel suo
+contesto originale: l'\emph{MPC approssimato}. Lì il problema è un altro: si ha
+già un MPC con buone proprietà, ma risolverlo online, o memorizzarne la
+soluzione esplicita, costa troppo. Si calcola allora la soluzione ottima
+$z^*(v)$ in alcuni punti campione $v\in V$ dello spazio di stato e la si
+interpola nei punti intermedi.
+
+\paragraph{Gli strumenti del capitolo 13.}
+\begin{itemize}
+  \item \libro{Def.~13.1}: un insieme di funzioni $w_v(x)$ è
+        \emph{baricentrico} su $\Conv(V)$ se $w_v(x)\ge 0$ (positività),
+        $\sum_v w_v(x)=1$ (partizione dell'unità) e $\sum_v v\,w_v(x)=x$
+        (precisione lineare). Sono esattamente i vincoli sui pesi $\lambda$
+        nel problema~\eqref{eq:LP} (\eqp{15b}--\eqp{15c}).
+  \item \libro{eq.~(13.18)}: la soluzione interpolata è
+        $\tilde z(x)=\sum_v w_v(x)\,z^*(v)$.
+  \item \libro{Lemma~13.1} (\emph{proprietà dell'inviluppo convesso}): la
+        soluzione interpolata è ammissibile in tutto $\Conv(V)$. Il motivo è
+        che i vincoli sono convessi congiuntamente in soluzione e stato: è lo
+        stesso meccanismo del lemma~\ref{lem:traiettorie} e della
+        proposizione~\ref{prop:CS-invariante}.
+  \item \libro{Lemma~13.2}:
+        $J^*(x)\le J(\tilde z(x),x)\le\sum_v w_v(x)J^*(v)$. L'interpolazione
+        dei costi nei campioni sovrastima il costo della soluzione
+        interpolata, che a sua volta sovrastima l'ottimo. È la
+        proposizione~\ref{prop:P}(b), e la figura~13.3 del libro è
+        l'analoga della figura~\ref{fig:baricentrica}.
+  \item \libro{Teorema~13.2}: per certificare la qualità
+        dell'approssimazione su $\Conv(V)$ si ottimizza ``su tutte le
+        possibili funzioni baricentriche'', cioè sui pesi $\lambda_v\ge 0$
+        con $\sum\lambda_v=1$ e $\sum\lambda_v v=x$. Compare cioè lo stesso
+        minimo sui pesi che definisce $P^j$ nel paper.
+  \item \libro{Teorema~13.1}: un MPC risolto in modo \emph{subottimo} resta
+        stabile se l'errore di subottimalità è minore del costo di stadio. La
+        dimostrazione è ancora quella della sequenza traslata.
+\end{itemize}
+
+\paragraph{Come il paper usa questi strumenti.}
+La corrispondenza è diretta se si legge ogni stato memorizzato $x^i_s$ come un
+campione $v$, e la coda di traiettoria memorizzata che parte da lì,
+$(u^i_s,u^i_{s+1},\dots)$, come la ``soluzione nel campione''. Allora:
+\begin{itemize}
+  \item l'ingresso $\bar u=\sum\lambda^{*,i}_s u^i_s$ usato nella prova di
+        fattibilità (proposizione~\ref{prop:CS-invariante}) è
+        l'interpolazione baricentrica~(13.18) del primo ingresso delle code
+        memorizzate;
+  \item la prova del Lemma~13.2 non usa l'ottimalità delle soluzioni nei
+        campioni, solo la loro ammissibilità e la convessità del costo; per
+        questo funziona anche con le traiettorie del paper, che sono
+        ammissibili ma non ottime. Al posto del costo ottimo nel campione
+        compare il costo realizzato $J^i_{s\to\infty}$, e si ottiene
+        $P^j\ge\Jstar$;
+  \item la scelta dei pesi che minimizza il costo interpolato (il programma
+        lineare~\eqref{eq:LP}) è quella che il Teorema~13.2 usa come
+        rilassamento.
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\caption{Interpolazione baricentrica nel libro (cap.~13) e nel paper.}\label{tab:baricentrica}
+\small
+\begin{tabular}{p{2.6cm}p{5.6cm}p{5.9cm}}
+\toprule
+ & Libro, cap.~13 & Paper \\
+\midrule
+Scopo & ridurre il calcolo online, approssimando un MPC già progettato
+      & migliorare le prestazioni, imparando insieme e costo terminali \\
+Campioni & punti scelti offline (triangolazioni, griglie, Algoritmo~13.1)
+         & stati visitati dal sistema in anello chiuso \\
+Valori nei campioni & soluzioni \emph{ottime} $z^*(v)$ e costi ottimi
+                    & traiettorie \emph{realizzate} e costi realmente pagati \\
+Pesi & funzioni baricentriche fissate per regione (Def.~13.3, Lemma~13.5)
+     & scelti a ogni istante da un LP che minimizza il costo \\
+Che cosa si interpola & la legge di controllo
+                      & il costo terminale (e implicitamente l'ingresso $\bar u$) \\
+Garanzia & Teorema~13.1 (MPC subottimo)
+         & Teorema~12.2 di [BBM] / Teorema~1 del paper \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Programmazione multiparametrica: la forma di $P^j$ e di $\JL$}\label{sec:libro-mp}
+
+La parte~II del libro studia i problemi di ottimo in cui un vettore di
+parametri $x$ entra nei vincoli: i \emph{programmi multiparametrici}. Due
+risultati si applicano al paper.
+
+\paragraph{$P^j$ è la funzione valore di un mp-LP.}
+Il problema~\eqref{eq:LP} che definisce $P^j$ ha la forma~(6.11) di [BBM],
+\[
+  \min_z\ c^\top z\quad\text{s.t. } Gz\le w+Sx,
+\]
+con variabile $z=\lambda$, parametro $x$, costo $c=\vett{c}^j$ (i costi
+realizzati) e vincoli $\lambda\ge 0$, $\vett{1}^\top\lambda=1$,
+$\vett{D}^j\lambda=x$ (le uguaglianze si scrivono come coppie di
+disuguaglianze). Il Teorema~6.5 e il Corollario~5.1 del libro dicono che la
+funzione valore di un mp-LP è \emph{convessa, continua e affine a tratti} sul
+suo dominio, che qui è $\CS^j$. Si ritrova così, in forma più forte, la
+proposizione~\ref{prop:P}(a), e si rende rigorosa l'immagine geometrica della
+figura~\ref{fig:baricentrica}: le \emph{regioni critiche} dell'mp-LP, in cui
+l'insieme dei pesi attivi non cambia, sono le proiezioni delle facce
+inferiori dell'inviluppo convesso dei punti $(x^i_s,J^i_{s\to\infty})$, e su
+ciascuna $P^j$ è affine.
+
+\paragraph{$\JL$ è la funzione valore di un programma parametrico convesso.}
+Il problema~\eqref{eq:lmpc-unico} ha come parametro lo stato misurato
+$x^j_t$ ed è convesso congiuntamente nelle variabili di decisione e nel
+parametro. La sua funzione valore $\JL$ è quindi convessa: la dimostrazione
+è la stessa della proposizione~\ref{prop:P}(a) e del Teorema~6.7 del libro
+(si combinano convessamente le soluzioni ottime in due stati). Il Teorema~6.7
+non si applica alla lettera, perché richiede una matrice hessiana definita
+positiva, mentre qui il costo è lineare nei pesi $\lambda$; per la continuità
+servono i risultati generali del capitolo~5 (Teorema~5.2), oppure il rimando a
+Mayne et al.\ del paper. Una conseguenza concettuale: come l'MPC del libro, anche
+il LMPC di un'iterazione avrebbe in linea di principio una forma esplicita,
+una legge affine a tratti dello stato (capitoli~11--12 di [BBM]). Calcolarla
+non avrebbe senso, perché cambia a ogni iterazione e la sua complessità cresce
+con i dati: per il LMPC la soluzione online del QP (capitolo~14 di [BBM]) è la
+scelta naturale.
+
+\subsection{Orizzonte infinito, CLQR e ottimalità}\label{sec:libro-clqr}
+
+\paragraph{Iterazione sulla funzione valore.}
+La sezione~7.4.1 del libro descrive la \emph{value function iteration}: si
+parte da una stima della funzione valore su una regione, la si migliora
+applicando l'equazione di Bellman~\eqref{eq:bellman} in ogni punto di una
+griglia dello spazio di stato, e si interpola tra i punti della griglia. Il
+LMPC si può leggere come una variante di questa idea guidata dai dati, con
+tre differenze: i campioni non sono una griglia (il cui numero di punti cresce
+in modo esponenziale con la dimensione dello stato) ma gli stati che il
+sistema visita davvero; la stima della funzione valore non si ottiene
+risolvendo l'equazione di Bellman punto per punto ma \emph{misurando} i costi
+lungo le traiettorie; e l'interpolazione è convessa, il che garantisce che la
+stima resti per eccesso (proposizione~\ref{prop:P}(b)) e decresca con le
+iterazioni (proposizione~\ref{prop:P}(d)). È un'analogia, non
+un'equivalenza: il paper non presenta il LMPC in questi termini.
+
+\paragraph{Il costo terminale come costo della coda.}
+Commentando la scelta $\Xf=\mathcal{O}^{\mathrm{LQR}}_\infty$,
+$p(x)=x^\top P_\infty x$, il libro osserva che i due termini del costo
+dell'MPC ``riflettono il costo a orizzonte infinito'': la somma sugli $N$
+passi è il costo del tratto iniziale, in cui i vincoli possono essere attivi,
+e il costo terminale è il costo esatto della \emph{coda} infinita, percorsa
+dentro un insieme in cui i vincoli non sono più attivi
+(equazioni~(12.24)--(12.26) di [BBM]). Nel LMPC $P^{j-1}$ ha la stessa
+funzione, con due differenze: è definito su una regione molto più grande, in
+cui i vincoli possono essere attivi, ed è il costo di code \emph{realmente
+percorse} invece che di una coda calcolata analiticamente.
+
+\paragraph{Orizzonte finito che restituisce l'ottimo infinito.}
+Il Teorema~11.3 del libro (Sznaier e Damborg, Scokaert e Rawlings) afferma che
+il problema a orizzonte finito con costo terminale $x^\top P_\infty x$ e senza
+vincolo terminale coincide con il CLQR a orizzonte infinito, se lo stato
+finale predetto entra ``spontaneamente'' nell'insieme in cui quel costo
+terminale è esatto. Il Teorema~3 del paper ha lo stesso spirito: un orizzonte
+finito restituisce l'ottimo a orizzonte infinito quando il costo terminale
+descrive correttamente il costo della coda. La differenza è che nel libro la
+correttezza del costo terminale è garantita da un calcolo, mentre nel LMPC è
+il punto d'arrivo delle iterazioni.
+
+\paragraph{Il riferimento dell'esempio.}
+La soluzione esatta del CLQR con cui il paper confronta il LMPC
+(sezione~\ref{sec:esempio}) è calcolata con l'algoritmo che il paper attribuisce
+a Borrelli (2003) e che nel libro è descritto nella sezione~11.3.5: si parte
+dall'insieme $\mathcal{O}^{\mathrm{LQR}}_\infty$ e si esplorano le regioni
+vicine risolvendo problemi a orizzonte crescente, fino a coprire l'insieme di
+stati iniziali di interesse. Il Teorema~11.4 ne descrive il risultato: una
+legge di controllo continua e affine a tratti su una partizione poliedrica.
+
+\subsection{Il doppio integratore nel libro}\label{sec:libro-esempio}
+
+Il sistema dell'esempio del paper, il doppio integratore
+$x_{k+1}=\left[\begin{smallmatrix}1&1\\0&1\end{smallmatrix}\right]x_k+
+\left[\begin{smallmatrix}0\\1\end{smallmatrix}\right]u_k$, è il sistema di
+riferimento del libro (equazione~(11.23) di [BBM]), con limiti numerici
+diversi da quelli del paper. Tre esempi del libro aiutano a leggere il paper:
+\begin{itemize}
+  \item \libro{Esempio~11.1} mostra come si propagano all'indietro gli insiemi
+        ammissibili $\Xc_i$, con insieme terminale controllo-invariante oppure
+        senza: è l'illustrazione dei Teoremi~11.1--11.2, quindi della
+        regione $K_N(\CS^{j-1})$ della sezione~\ref{sec:libro-insiemi};
+  \item \libro{Esempio~11.2} calcola la legge ottima esplicita, affine a
+        tratti, di un CLQR a orizzonte finito: è il tipo di soluzione che il
+        paper usa come termine di confronto;
+  \item \libro{Esempio~12.1} applica il receding horizon con orizzonte breve e
+        \emph{senza insieme terminale}: da uno stato iniziale il sistema
+        converge, da uno stato vicino il problema di ottimo diventa
+        impossibile dopo pochi passi, perché le predizioni ad anello aperto
+        non coincidono con l'evoluzione in anello chiuso. È esattamente il
+        fallimento che un insieme terminale controllo-invariante impedisce,
+        e quindi ciò che il safe set convesso garantisce al LMPC.
+\end{itemize}
+
+\subsection{Dal MIP al QP: un rilassamento che non perde nulla}\label{sec:libro-mip}
+
+Nel LMPC non lineare del 2016 il vincolo terminale $x_{t+N|t}\in\SSet^{j-1}$
+è un vincolo \emph{logico}: lo stato finale deve coincidere con il primo punto
+memorizzato, \emph{oppure} con il secondo, \emph{oppure} con il terzo, e così
+via. Il capitolo~16 del libro (sezione~16.4) mostra come vincoli logici di
+questo tipo si traducano in disuguaglianze con variabili binarie, e il
+capitolo~17 (sezione~17.4) come l'MPC che ne risulta richieda di risolvere un
+MIQP. La sezione~17.4.1 ricorda che questi problemi sono NP-completi e
+descrive il \emph{branch and bound}: il primo passo dell'algoritmo è
+\emph{rilassare} le variabili binarie, lasciandole variare con continuità in
+$[0,1]$, e risolvere il problema continuo che ne risulta; poi si ramifica
+fissando le variabili una alla volta.
+
+Il LMPC convesso del paper è esattamente quel primo rilassamento: le binarie
+$\delta^i_s\in\{0,1\}$ diventano i pesi $\lambda^i_s\in[0,1]$. In generale il
+rilassamento di un MIP fornisce solo un limite inferiore e una soluzione che
+può non rispettare i vincoli originali; per questo il branch and bound deve
+proseguire. Il punto del paper è che, \emph{per sistemi lineari}, la soluzione
+del problema rilassato è già ``sicura'': lo stato finale è in $\CS^{j-1}$, che
+è controllo-invariante, e tutte le garanzie restano valide. Non serve
+ramificare: basta un solo QP. Il problema rilassato non è equivalente al MIP
+(il suo ottimo è in generale migliore, perché ha più libertà), ma ha le stesse
+proprietà, ed è questo che spiega il risparmio di tempo osservato
+nell'esempio.
+
+\subsection{Che cosa aggiunge il paper rispetto al libro}\label{sec:libro-novita}
+
+\begin{itemize}
+  \item \emph{Ingredienti terminali dai dati.} Nel libro insieme e costo
+        terminali si progettano (LQR e massimo insieme invariante) con
+        operazioni sui poliedri; nel paper si leggono dalle traiettorie
+        registrate, senza alcuna operazione sugli insiemi.
+  \item \emph{La dimensione iterativa.} Il libro tratta un singolo problema
+        di controllo; non contiene l'idea di eseguire il compito più volte e
+        di garantire che il costo non peggiori da un'esecuzione all'altra
+        (Teoremi~2 e~3 del paper).
+  \item \emph{Un uso nuovo dell'interpolazione baricentrica.} Nel libro
+        serve ad approssimare una legge già nota; nel paper serve a costruire
+        un costo terminale da dati non ottimi, sfruttando che la prova del
+        Lemma~13.2 richiede solo ammissibilità e convessità.
+  \item \emph{Dove guardare per estendere il paper.} Gli strumenti per
+        rimuovere le ipotesi più forti sono nel libro: insiemi invarianti
+        robusti e MPC robusto (sezioni~10.3--10.4 e capitolo~15) per
+        disturbi e incertezze di modello; sistemi ibridi e MIQP
+        (capitoli~16--17) per uscire dalla linearità, con il costo
+        computazionale che il paper ha voluto evitare.
+\end{itemize}
+
+% ===========================================================================
+\section{Ipotesi, limiti e osservazioni}\label{sec:limiti}
+% ===========================================================================
+
+\begin{itemize}
+  \item \emph{Modello esatto e assenza di disturbi.} Tutta la prova di
+        fattibilità ricorsiva usa la~\eqref{eq:modello-esatto}: lo stato
+        realizzato coincide con quello predetto. Con incertezze di modello o
+        disturbi, i punti memorizzati non sono più traiettorie esatte del
+        modello di predizione e le garanzie cadono; servono versioni robuste,
+        costruite con gli insiemi invarianti robusti e l'MPC robusto del libro
+        \libro{Sez.~10.3--10.4 e Cap.~15}.
+  \item \emph{Linearità.} È l'ipotesi che rende lecita la convessificazione
+        (lemma~\ref{lem:traiettorie}). Per sistemi non lineari si torna al
+        safe set discreto, oppure si usano approssimazioni locali (lavori
+        successivi degli stessi autori), rinunciando a parte delle garanzie.
+  \item \emph{Stesso stato iniziale.} Le iterazioni partono tutte da $x_S$. È
+        ciò che rende la traiettoria precedente una candidata ammissibile
+        all'istante iniziale (passo 1 del teorema~\ref{teo:1} e prima
+        disuguaglianza del teorema~\ref{teo:2}).
+  \item \emph{Serve una prima traiettoria ammissibile}
+        (ipotesi~\ref{ip:iterazione-zero}). Il LMPC migliora, ma non crea dal
+        nulla la prima soluzione.
+  \item \emph{Crescita dei dati.} Il numero di variabili $\lambda$ cresce con
+        il numero di stati memorizzati: il QP diventa sempre più grande. Il
+        paper non discute come limitarlo.
+  \item \emph{Iterazioni finite.} La teoria è scritta per traiettorie infinite;
+        la versione pratica tronca le traiettorie quando lo stato ha
+        raggiunto $x_F$ con tolleranza $\varepsilon$, il che introduce piccole
+        approssimazioni non analizzate.
+  \item \emph{Convergenza delle traiettorie.} Il teorema di ottimalità la
+        assume, non la dimostra.
+\end{itemize}
+
+% ===========================================================================
+\section{Riepilogo}\label{sec:riepilogo}
+% ===========================================================================
+
+\begin{table}[h]
+\centering
+\caption{MPC classico e LMPC a confronto.}\label{tab:confronto}
+\begin{tabular}{p{3.4cm}p{5.2cm}p{5.6cm}}
+\toprule
+ & MPC classico & LMPC \\
+\midrule
+Insieme terminale & progettato (es.\ invariante LQR), spesso piccolo & $\CS^{j-1}$, inviluppo convesso degli stati visitati; cresce con le iterazioni \\
+Costo terminale & progettato (es.\ $x^\top P_\infty x$) & $P^{j-1}$, interpolazione convessa dei costi realizzati; diminuisce con le iterazioni \\
+Perché soddisfano la~\eqref{eq:clf} & per costruzione analitica & lemma~\ref{lem:decrescita}: linearità + convessità + costi realmente pagati \\
+Problema a ogni istante & QP & QP con in più i pesi $\lambda$ \\
+Garanzie & fattibilità ricorsiva, stabilità & le stesse, più miglioramento tra iterazioni e ottimalità della traiettoria limite \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+I passaggi logici del paper, in sintesi:
+\begin{enumerate}
+  \item Un compito iterativo fornisce, a ogni esecuzione, una traiettoria
+        ammissibile e il costo realmente pagato da ogni suo stato.
+  \item Gli stati visitati sono sicuri (proposizione~\ref{prop:SS}). Per un
+        sistema lineare con vincoli convessi lo è anche ogni loro
+        combinazione convessa: il safe set convesso $\CS^j$ è
+        controllo-invariante (proposizione~\ref{prop:CS-invariante}).
+  \item Interpolando convessamente i costi realizzati si ottiene $P^j$, una
+        funzione convessa che sovrastima il costo ottimo e che decresce
+        almeno del costo di stadio lungo opportune combinazioni degli ingressi
+        memorizzati (lemma~\ref{lem:decrescita}).
+  \item Usando $(\CS^{j-1},P^{j-1})$ come ingredienti terminali, l'MPC è un
+        problema convesso (QP) e le dimostrazioni classiche danno fattibilità
+        ricorsiva e stabilità (teorema~\ref{teo:1}).
+  \item Il costo di ogni iterazione è limitato dal costo dell'iterazione
+        precedente (teorema~\ref{teo:2}) e, se le traiettorie convergono, il
+        limite è l'ottimo a orizzonte infinito (teorema~\ref{teo:3}).
+  \item Rispetto al LMPC non lineare, il passaggio dall'insieme discreto
+        all'inviluppo convesso trasforma un MIP in un QP, con un risparmio
+        computazionale di diversi ordini di grandezza.
+  \item Nel quadro del libro di Borrelli, Bemporad e Morari
+        (sezione~\ref{sec:libro}): il Teorema~1 è il Teorema~12.2 di [BBM]
+        con $(\Xf,p)=(\CS^{j-1},P^{j-1})$; $P^j$ è l'interpolazione
+        baricentrica del capitolo~13, applicata a traiettorie realizzate
+        invece che a soluzioni ottime, ed è la funzione valore di un mp-LP
+        (capitolo~6); il passaggio dal MIP al QP è il rilassamento continuo
+        con cui inizia il branch and bound (capitolo~17), che per sistemi
+        lineari conserva tutte le garanzie.
+\end{enumerate}
+
+% ===========================================================================
+\begin{thebibliography}{9}
+\bibitem{rosolia2017} U.~Rosolia, F.~Borrelli, \emph{Learning Model
+  Predictive Control for Iterative Tasks: A Computationally Efficient Approach
+  for Linear System}, IFAC PapersOnLine 50-1 (2017), 3142--3147.
+\bibitem{rosolia2016} U.~Rosolia, F.~Borrelli, \emph{Learning Model
+  Predictive Control for Iterative Tasks}, arXiv:1609.01387 (2016); versione
+  estesa: \emph{Learning Model Predictive Control for Iterative Tasks. A
+  Data-Driven Control Framework}, IEEE Transactions on Automatic Control
+  63(7) (2018).
+\bibitem{mayne2000} D.Q.~Mayne, J.B.~Rawlings, C.V.~Rao, P.O.M.~Scokaert,
+  \emph{Constrained model predictive control: Stability and optimality},
+  Automatica 36(6) (2000), 789--814.
+\bibitem{borrelli2003} F.~Borrelli, \emph{Constrained Optimal Control of
+  Linear and Hybrid Systems}, Springer (2003).
+\bibitem{bbm2017} F.~Borrelli, A.~Bemporad, M.~Morari, \emph{Predictive
+  Control for Linear and Hybrid Systems}, Cambridge University Press (2017).
+\bibitem{jones2010} C.N.~Jones, M.~Morari, \emph{Polytopic approximation of
+  explicit model predictive controllers}, IEEE Transactions on Automatic
+  Control 55(11) (2010), 2542--2553.
+\bibitem{bristow2006} D.A.~Bristow, M.~Tharayil, A.G.~Alleyne, \emph{A survey
+  of iterative learning control}, IEEE Control Systems 26(3) (2006), 96--114.
+\bibitem{boyd2004} S.~Boyd, L.~Vandenberghe, \emph{Convex Optimization},
+  Cambridge University Press (2004).
+\end{thebibliography}
+
+\end{document}
